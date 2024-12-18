@@ -143,7 +143,7 @@ impl<'a> Request<'a> {
         ptr: *mut sys::TRITONSERVER_InferenceRequest,
         server: &'a Server,
         model: M,
-    ) -> Result<Request, Error> {
+    ) -> Result<Request<'a>, Error> {
         Ok(Request {
             ptr,
             model_name: model.as_ref().to_string(),
@@ -531,9 +531,9 @@ impl<'a> Request<'a> {
     }
 }
 
-unsafe impl<'a> Send for Request<'a> {}
+unsafe impl Send for Request<'_> {}
 
-impl<'a> Drop for Request<'a> {
+impl Drop for Request<'_> {
     fn drop(&mut self) {
         unsafe {
             sys::TRITONSERVER_InferenceRequestDelete(self.ptr);

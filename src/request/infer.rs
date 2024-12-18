@@ -53,7 +53,7 @@ pub struct ResponseFuture {
 pub struct InputRelease(pub(super) oneshot::Receiver<HashMap<String, Buffer>>);
 
 /// Start inference.
-impl<'a> Request<'a> {
+impl Request<'_> {
     /// Perform inference using the metadata and inputs supplied by the Request(self). \
     /// If the function returns success,
     /// the returned struct can be used to get results (.await) of the inference and

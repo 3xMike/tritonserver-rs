@@ -120,3 +120,6 @@ For further details, check out the following resources:
 - **CUDA-optimized**: Directly handle model inputs and outputs on GPU memory.  
 - **Dynamic server management**: Advanced runtime control features.  
 - **Rust-based**: Enjoy the safety, speed, and concurrency benefits of Rust.
+
+# Tritonserver C-lib API version
+`1.34`
