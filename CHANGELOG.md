@@ -6,13 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0](https://github.com/3xMike/tritonserver-rs/tags/0.2.0) - 2024-12-20
 ### Changed:
+- Triton C-API version to 1.33.
+- Minimal TritonInferenceServer container version to 24.07.
 - Folowwing bitflag structs with consts now enums (variant names changed to UpperCamelCase):
     - metrics::Format,
     - options::{Control, Limit},
     - parameter::TritonParameterType,
     - request::Sequence,
-    - server::{Batch, Transaction},
-    - 
+    - server::{Batch, Transaction}.
 - trace::Level:
     - now it's bitflag struct instead of enum (variant names changed to UPPER_CASE),
     - MIN and MAX consts are depricated,

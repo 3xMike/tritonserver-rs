@@ -1,7 +1,7 @@
-ARG TRITON_CONTAINER_VERSION=23.01
+ARG TRITON_CONTAINER_VERSION=24.07
 
 FROM nvcr.io/nvidia/tritonserver:${TRITON_CONTAINER_VERSION}-py3
-ARG RUST_VERSION=1.80.1
+ARG RUST_VERSION=1.81
 
 RUN ln -s /opt/tritonserver/lib/libtritonserver.so /lib/x86_64-linux-gnu/libtritonserver.so
 

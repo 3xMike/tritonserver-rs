@@ -13,10 +13,14 @@ In addition, **Triton backends** are required to **run** the application.
 It is highly recommended to use a development environment based on the [official Triton Inference Server Docker image](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/tritonserver). The provided [Dockerfile.dev](./Dockerfile.dev) includes all necessary dependencies for building and running **Tritonserver-rs** applications.  
 
 ```sh
-$ docker build --network host -t triton_dev:23.04 --build-arg TRITON_CONTAINER_VERSION=23.04 -f ../Dockerfile.dev .
+$ docker build --network host -t triton_dev:24.07 --build-arg TRITON_CONTAINER_VERSION=24.07 -f ../Dockerfile.dev .
 ```
 
 You can find an example deployment using this container in the [examples folder](./examples/README.md).  
+
+### Minimal TritonInferenceServer container version.
+Since Triton C-lib API must not be older than our bindings API (1.25 currently), minimal TRITON_CONTAINER_VERSION is 24.07.
+
 ---
 
 # **Production**  
@@ -30,7 +34,7 @@ To further reduce image size, you can create a minimal base image instead of usi
 ### Example Script for Minimal Base Image  
 
 ```sh
-export TRITON_CONTAINER_VERSION=23.10
+export TRITON_CONTAINER_VERSION=24.07
 export MIN_IMG=min_img:$TRITON_CONTAINER_VERSION
 export BASE_IMG=base:$TRITON_CONTAINER_VERSION
 

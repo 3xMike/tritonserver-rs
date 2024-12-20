@@ -1,3 +1,54 @@
+//! Tracing utilities for debugging and profiling.
+//!
+//! Usage example:
+//! ```
+//! struct TraceH;
+//! impl TraceHandler for TraceH {
+//!     fn trace_activity(
+//!        &self,
+//!        trace: &tritonserver_rs::trace::Trace,
+//!        event: Activity,
+//!        event_time: Duration,
+//!     ) {
+//!         log::info!(
+//!             "Tracing activities: Trace_id: {}, event: {event:?}, event_time_secs: {}",
+//!             trace.id().unwrap(),
+//!             event_time.as_secs()
+//!         );
+//!         if event == Activity::ComputeStart {
+//!             log::info!("Computations start, spawning new Trace");
+//!             trace.spawn_child().unwrap();
+//!         }
+//!     }
+//! }
+//!
+//! impl TensorTraceHandler for TraceH {
+//!     fn trace_tensor_activity(
+//!         &self,
+//!         trace: &Trace,
+//!         event: Activity,
+//!         _tensor_data: &tritonserver_rs::Buffer,
+//!         tensor_shape: tritonserver_rs::message::Shape,
+//!     ) {
+//!         log::info!(
+//!             "Tracing Tensor Activity: Trace_id: {}, event: {event:?}, tensor name: {}",
+//!             trace.id().unwrap(),
+//!             tensor_shape.name
+//!         );
+//!     }
+//! }
+//!
+//! /// Adds custom tracing to Inference Request.
+//! fn add_trace_to_request(request: &mut Request) {
+//!    request.add_trace(Trace::new_with_handle(
+//!        Level::TIMESTAMPS | Level::TENSORS,
+//!        0,
+//!        TraceH,
+//!        Some(TraceH),
+//!    ).unwrap());
+//! }
+//! ```
+
 use core::slice;
 use std::{
     ffi::{c_void, CStr},

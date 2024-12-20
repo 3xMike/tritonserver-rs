@@ -19,13 +19,13 @@ The examples are designed to run inside Docker containers for ease of deployment
 ### **Step 1: Build the Development Image**  
 If you haven’t already built the development Docker image, follow the steps in [DEPLOY.md](../DEPLOY.md):  
 ```sh
-$ docker build --network host -t triton_dev:23.04 --build-arg TRITON_CONTAINER_VERSION=23.04 -f ../Dockerfile.dev .
+$ docker build --network host -t triton_dev:24.07 --build-arg TRITON_CONTAINER_VERSION=24.07 -f ../Dockerfile.dev .
 ```
 
 ### **Step 2: Build the Examples Image**  
 Once the development image is ready, build the image for running the pipelines. This image includes all the necessary libraries for the models:  
 ```sh
-$ docker build --network host -t examples_img:0.1 --build-arg DEV_IMAGE=triton_dev:23.04 -f ./Dockerfile .
+$ docker build --network host -t examples_img:0.1 --build-arg DEV_IMAGE=triton_dev:24.07 -f ./Dockerfile .
 ```
 
 ### **Step 3: Run the Container**  
@@ -39,7 +39,7 @@ $ docker run -it --rm --entrypoint sh -v .:/opt/tritonserver/workspace --network
 If no edits are needed, simply run the container:  
 ```sh
 $ docker run -it --rm --network=host -v .:/opt/tritonserver/workspace examples_img:0.1 \
-    "binary name" [cargo params]
+    "binary name" [binary CLI args]
 ```
 
 ---

@@ -58,7 +58,7 @@ pub trait Allocator: Send {
         false
     }
 
-    /// If [self.unable_queries()](Allocator::unable_queries) is true,
+    /// If [self.enable_queries()](Allocator::enable_queries) is true,
     /// this function will be called to query the allocator's preferred memory type. \
     /// As much as possible, the allocator should attempt to return the same memory_type
     /// values that will be returned by the subsequent call to [Allocator::allocate].
