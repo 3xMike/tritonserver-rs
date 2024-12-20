@@ -50,10 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - impl PartialEq for Trace,
     - methods Trace::{report_activity(), request_id(), spawn_child(), set_context(), context()}.
 
-
 ### Depricated:
 - options::Options::response_cache_byte_size().
 - trace::Level::{MIN, MAX}.
+
+### Notes:
+Following Tritonserver C-API structures and their functions was not implemented, because the author saw no benefit of them: BufferAttributes. It might be implement by the first Issue/Pull Request that will give clear explainations why it might be needed.
+
+Metric (not to be confused with Metrics) will not be implemented because there are better solutions on Rust.
 
 ## [0.1.0](https://github.com/3xMike/tritonserver-rs/tags/0.1.0) - 2024-12-04
 INITIAL STATE
