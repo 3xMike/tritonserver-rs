@@ -3,23 +3,28 @@ mod utils;
 pub use crate::trace::Trace;
 pub use infer::{InferenceError, InputRelease, ResponseFuture};
 
-use std::{collections::HashMap, ffi::CStr, os::raw::c_char, ptr::null, time::Duration};
-
-use bitflags::bitflags;
+use std::{collections::HashMap, mem::transmute, os::raw::c_char, ptr::null, time::Duration};
 
 use crate::{
-    error::{ErrorCode, CSTR_CONVERT_ERROR_PLUG},
+    error::ErrorCode,
+    from_char_array,
     memory::{Buffer, DataType, MemoryType},
     message::Shape,
-    run_in_context, sys, to_cstring, Error, Server,
+    parameter::{Parameter, ParameterContent},
+    run_in_context,
+    sys::{
+        self, TRITONSERVER_InferenceRequestRemoveAllInputData,
+        TRITONSERVER_InferenceRequestRemoveAllInputs, TRITONSERVER_InferenceRequestRemoveInput,
+    },
+    to_cstring, Error, Server,
 };
 
-bitflags! {
-    /// Inference request sequence flag.
-    pub struct Sequence: u32 {
-        const START = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_START;
-        const END = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_END;
-    }
+/// Inference request sequence flag.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Sequence {
+    Start = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_START,
+    End = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_END,
 }
 
 /// Allocator, that user provides in order to allocate output buffers when they are needed for Triton. \
@@ -46,6 +51,32 @@ pub trait Allocator: Send {
         requested_memory_type: MemoryType,
         byte_size: usize,
     ) -> Result<Buffer, Error>;
+
+    /// Unable or not a pre allocation queriing. For more info about queriing see [Allocator::pre_allocation_query]. \
+    /// Default is false.
+    fn enable_queries(&self) -> bool {
+        false
+    }
+
+    /// If [self.unable_queries()](Allocator::unable_queries) is true,
+    /// this function will be called to query the allocator's preferred memory type. \
+    /// As much as possible, the allocator should attempt to return the same memory_type
+    /// values that will be returned by the subsequent call to [Allocator::allocate].
+    /// But the allocator is not required to do so.
+    ///
+    /// `tensor_name` The name of the output tensor. None indicates that the tensor name has not determined. \
+    /// `byte_size` The expected size of the buffer. None indicates that the byte size has not determined.\
+    /// `requested_memory_type` input gives the memory type preferred by the Triton inference. \
+    /// Returns memory type preferred by the allocator, taken account of the caller preferred type.
+    #[allow(unused_variables)]
+    async fn pre_allocation_query(
+        &mut self,
+        tensor_name: Option<String>,
+        byte_size: Option<usize>,
+        requested_memory_type: MemoryType,
+    ) -> MemoryType {
+        requested_memory_type
+    }
 }
 
 /// Default allocator.
@@ -179,17 +210,12 @@ impl<'a> Request<'a> {
     }
 
     /// Get the ID of the request.
-    pub fn get_id(&self) -> Result<&str, Error> {
+    pub fn get_id(&self) -> Result<String, Error> {
         let mut id = null::<c_char>();
-        triton_call!(sys::TRITONSERVER_InferenceRequestId(
-            self.ptr,
-            &mut id as *mut _
-        ))?;
-
-        assert!(!id.is_null());
-        Ok(unsafe { CStr::from_ptr(id) }
-            .to_str()
-            .unwrap_or(CSTR_CONVERT_ERROR_PLUG))
+        triton_call!(
+            sys::TRITONSERVER_InferenceRequestId(self.ptr, &mut id as *mut _),
+            from_char_array(id)
+        )
     }
 
     /// Set the ID of the request.
@@ -205,17 +231,18 @@ impl<'a> Request<'a> {
     /// Check [Sequence] for available flags.
     pub fn get_flags(&self) -> Result<Sequence, Error> {
         let mut flag: u32 = 0;
-        triton_call!(
-            sys::TRITONSERVER_InferenceRequestFlags(self.ptr, &mut flag as *mut _),
-            unsafe { Sequence::from_bits_unchecked(flag) }
-        )
+        triton_call!(sys::TRITONSERVER_InferenceRequestFlags(
+            self.ptr,
+            &mut flag as *mut _
+        ))?;
+        unsafe { Ok(transmute::<u32, Sequence>(flag)) }
     }
 
     /// Set the flag(s) associated with a request. \
     /// Check [Sequence] for available flags.
     pub fn set_flags(&mut self, flags: Sequence) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_InferenceRequestSetFlags(self.ptr, flags.bits()),
+            sys::TRITONSERVER_InferenceRequestSetFlags(self.ptr, flags as _),
             self
         )
     }
@@ -238,17 +265,12 @@ impl<'a> Request<'a> {
     /// If the correlation id associated with the inference request is an unsigned integer, then this function will return a failure. \
     /// The correlation ID is used to indicate two or more inference request are related to each other. \
     /// How this relationship is handled by the inference server is determined by the model's scheduling policy.
-    pub fn get_correlation_id_as_str(&self) -> Result<&str, Error> {
+    pub fn get_correlation_id_as_string(&self) -> Result<String, Error> {
         let mut id = null::<c_char>();
-        triton_call!(sys::TRITONSERVER_InferenceRequestCorrelationIdString(
-            self.ptr,
-            &mut id as *mut _
-        ))?;
-
-        assert!(!id.is_null());
-        Ok(unsafe { CStr::from_ptr(id) }
-            .to_str()
-            .unwrap_or(CSTR_CONVERT_ERROR_PLUG))
+        triton_call!(
+            sys::TRITONSERVER_InferenceRequestCorrelationIdString(self.ptr, &mut id as *mut _),
+            from_char_array(id)
+        )
     }
 
     /// Set the correlation ID of the inference request to be an unsigned integer. \
@@ -507,6 +529,43 @@ impl<'a> Request<'a> {
         Ok(self)
     }
 
+    /// Remove an input from a request. Returns appended to the input data.
+    ///
+    /// `name` The name of the input. \
+    pub fn remove_input<N: AsRef<str>>(&mut self, name: N) -> Result<Buffer, Error> {
+        let buffer = self.input.remove(name.as_ref()).ok_or_else(|| {
+            Error::new(
+                ErrorCode::InvalidArg,
+                format!(
+                    "Can't find input {} in a request. Appended inputs: {:?}",
+                    name.as_ref(),
+                    self.input.keys()
+                ),
+            )
+        })?;
+        let name = to_cstring(name)?;
+
+        triton_call!(TRITONSERVER_InferenceRequestRemoveAllInputData(
+            self.ptr,
+            name.as_ptr()
+        ))?;
+        triton_call!(
+            TRITONSERVER_InferenceRequestRemoveInput(self.ptr, name.as_ptr()),
+            buffer
+        )
+    }
+
+    /// Remove all the inputs from a request. Returns appended to the inputs data.
+    pub fn remove_all_inputs(&mut self) -> Result<HashMap<String, Buffer>, Error> {
+        let mut buffers = HashMap::new();
+        std::mem::swap(&mut buffers, &mut self.input);
+
+        triton_call!(
+            TRITONSERVER_InferenceRequestRemoveAllInputs(self.ptr),
+            buffers
+        )
+    }
+
     pub(crate) fn add_outputs(&mut self) -> Result<&mut Self, Error> {
         let model = self.server.get_model(&self.model_name)?;
 
@@ -528,6 +587,46 @@ impl<'a> Request<'a> {
             sys::TRITONSERVER_InferenceRequestAddRequestedOutput(self.ptr, output_name.as_ptr()),
             self
         )
+    }
+
+    /// Set a parameter in the request. Does not support ParameterContent::Bytes.   
+    pub fn set_parameter(&mut self, parameter: Parameter) -> Result<&mut Self, Error> {
+        let name = to_cstring(&parameter.name)?;
+        match parameter.content.clone() {
+            ParameterContent::Bool(value) => triton_call!(
+                sys::TRITONSERVER_InferenceRequestSetBoolParameter(self.ptr, name.as_ptr(), value),
+                self
+            ),
+            ParameterContent::Bytes(_) => Err(Error::new(
+                ErrorCode::Unsupported,
+                "Request::set_parameter does not support ParameterContent::Bytes",
+            )),
+            ParameterContent::Int(value) => triton_call!(
+                sys::TRITONSERVER_InferenceRequestSetIntParameter(self.ptr, name.as_ptr(), value),
+                self
+            ),
+            ParameterContent::Double(value) => {
+                triton_call!(
+                    sys::TRITONSERVER_InferenceRequestSetDoubleParameter(
+                        self.ptr,
+                        name.as_ptr(),
+                        value
+                    ),
+                    self
+                )
+            }
+            ParameterContent::String(value) => {
+                let value = to_cstring(value)?;
+                triton_call!(
+                    sys::TRITONSERVER_InferenceRequestSetStringParameter(
+                        self.ptr,
+                        name.as_ptr(),
+                        value.as_ptr()
+                    ),
+                    self
+                )
+            }
+        }
     }
 }
 

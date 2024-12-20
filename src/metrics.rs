@@ -1,17 +1,15 @@
 use std::ptr::null;
 
-use bitflags::bitflags;
-
 use crate::{sys, Error};
 
-bitflags! {
-    /// Metric format types.
-    pub struct Format: u32 {
-        /// Base points to a single multiline
-        /// string that gives a text representation of the metrics in
-        /// prometheus format.
-        const PROMETHEUS = sys::tritonserver_metricformat_enum_TRITONSERVER_METRIC_PROMETHEUS;
-    }
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u32)]
+/// Metric format types.
+pub enum Format {
+    /// Base points to a single multiline
+    /// string that gives a text representation of the metrics in
+    /// prometheus format.
+    Prometheus = sys::tritonserver_metricformat_enum_TRITONSERVER_METRIC_PROMETHEUS,
 }
 
 /// Server metrics object.
@@ -25,7 +23,7 @@ impl Metrics {
 
         triton_call!(sys::TRITONSERVER_MetricsFormatted(
             self.0,
-            format.bits(),
+            format as _,
             &mut ptr as *mut _,
             &mut size as *mut _,
         ))?;

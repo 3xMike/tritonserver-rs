@@ -1,3 +1,4 @@
+use core::slice;
 use std::{
     ffi::{c_void, CStr},
     mem::{forget, transmute},
@@ -9,23 +10,39 @@ use std::{
 
 use crate::{
     error::{Error, CSTR_CONVERT_ERROR_PLUG},
-    sys,
+    from_char_array,
+    message::Shape,
+    sys, to_cstring, Buffer, MemoryType,
 };
 
-/// Trace levels
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[repr(u32)]
-pub enum Level {
-    Disabled = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_DISABLED,
-    Min = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_MIN,
-    Max = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_MAX,
+bitflags::bitflags! {
+    /// Trace levels. The trace level controls the type of trace
+    ///  activities that are reported for an inference request.
+    ///
+    /// Trace level values can be combined to trace multiple types of activities. For example, use
+    /// ([Level::TIMESTAMPS] | [Level::TENSORS]) to trace both timestamps and
+    ///  tensors for an inference request.
+    pub struct Level: u32 {
+        /// Tracing disabled. No trace activities are reported.
+        const DISABLED = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_DISABLED;
+        /// Deprecated. Use [Level::TIMESTAMPS].
+        #[deprecated]
+        const MIN = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_MIN;
+        /// Deprecated. Use [Level::TIMESTAMPS].
+        #[deprecated]
+        const MAX = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_MAX;
+        /// Record timestamps for the inference request.
+        const TIMESTAMPS = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_TIMESTAMPS;
+        /// Record input and output tensor values for the inference request.
+        const TENSORS = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_TENSORS;
+    }
 }
 
 impl Level {
     /// Get the string representation of a trace level.
     pub fn as_str(self) -> &'static str {
         unsafe {
-            let ptr = sys::TRITONSERVER_InferenceTraceLevelString(self as u32);
+            let ptr = sys::TRITONSERVER_InferenceTraceLevelString(self.bits());
             assert!(!ptr.is_null());
             CStr::from_ptr(ptr)
                 .to_str()
@@ -46,11 +63,17 @@ pub enum Activity {
         sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_COMPUTE_OUTPUT_START,
     ComputeEnd = sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_COMPUTE_END,
     RequestEnd = sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_REQUEST_END,
+    TensorQueueInput = sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_TENSOR_QUEUE_INPUT,
+    TensorBackendInput =
+        sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_TENSOR_BACKEND_INPUT,
+    TensorBackendOutput =
+        sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_TENSOR_BACKEND_OUTPUT,
+    CustomActivity = sys::tritonserver_traceactivity_enum_TRITONSERVER_TRACE_CUSTOM_ACTIVITY,
 }
 
 /// Inference event handler trait.
 pub trait TraceHandler: Send + 'static {
-    /// This function is invoked each time the `event` accures.
+    /// This function is invoked each time the `event` occures.
     ///
     /// `trace`: Trace object that was reported.
     /// Note that child traces of constructed one also are reported with this fn.
@@ -60,6 +83,39 @@ pub trait TraceHandler: Send + 'static {
     fn trace_activity(&self, trace: &Trace, event: Activity, event_time: Duration);
 }
 
+impl TraceHandler for () {
+    fn trace_activity(&self, _trace: &Trace, _event: Activity, _event_time: Duration) {}
+}
+/// Tensor event handler trait.
+pub trait TensorTraceHandler: Send + 'static {
+    /// This function is invoked each time the tensor `event` occures.
+    ///
+    /// `trace`: Trace object that was reported.
+    /// Note that child traces of constructed one also are reported with this fn.
+    /// Check [Trace::new_with_handle] for more info.\
+    /// `event`: activity that has occurred. \
+    /// `tensor_data`: borrowed buffer containing data of the tensor. \
+    /// `tensor_shape`: shape (name, data_type and dims) of the tensor.
+    fn trace_tensor_activity(
+        &self,
+        trace: &Trace,
+        event: Activity,
+        tensor_data: &Buffer,
+        tensor_shape: Shape,
+    );
+}
+
+impl TensorTraceHandler for () {
+    fn trace_tensor_activity(
+        &self,
+        _trace: &Trace,
+        _event: Activity,
+        _tensor_data: &Buffer,
+        _tensor_shape: Shape,
+    ) {
+    }
+}
+
 /// Inference object that provides custom tracing.
 ///
 /// Is constructed with [TraceHandler] object that is activated each time an event occures.
@@ -67,50 +123,119 @@ pub struct Trace {
     pub(crate) ptr: *mut sys::TRITONSERVER_InferenceTrace,
 }
 
+impl PartialEq for Trace {
+    fn eq(&self, other: &Self) -> bool {
+        let left = match self.id() {
+            Ok(l) => l,
+            Err(err) => {
+                log::warn!("Error getting ID for two Traces comparison: {err}");
+                return false;
+            }
+        };
+        let right = match other.id() {
+            Ok(r) => r,
+            Err(err) => {
+                log::warn!("Error getting ID for two Traces comparison: {err}");
+                return false;
+            }
+        };
+        left == right
+    }
+}
+impl Eq for Trace {}
+
 impl Trace {
     /// Create a new inference trace object.
     ///
-    /// The handler.trace_activity() will be called to report activity
-    /// for this trace as well as for any child traces that are spawned
-    /// by this one, and so the trace_activity should check the trace object (first argument)
-    /// to determine specifically what activity is being reported.
+    /// The `activity_handler` and `tensor_activity_handler` will be called to report activity
+    /// for this trace as well as for __every__ child traces that are spawned
+    /// by this one. So the [TraceHandler::trace_activity] and [TensorTraceHandler::trace_tensor_activity]
+    /// should check the trace object (first argument) that are passed to it
+    /// to determine specifically what trace was reported.
     ///
     /// `level`: The tracing level. \
     /// `parent_id`: The parent trace id for this trace.
     /// A value of 0 indicates that there is not parent trace. \
-    /// `handle`: The callback function where activity for the trace is reported.
-    pub fn new_with_handle<H: TraceHandler>(
+    /// `activity_handler`: The callback function where activity (on timeline event)
+    ///  for the trace (and all the child traces) is reported. \
+    /// `tensor_activity_handler`: Optional callback function where activity (on tensor event)
+    /// for the trace (and all the child traces) is reported.
+    pub fn new_with_handle<H: TraceHandler, T: TensorTraceHandler>(
         level: Level,
         parent_id: u64,
-        handle: Arc<H>,
+        activity_handler: H,
+        tensor_activity_handler: Option<T>,
     ) -> Result<Self, Error> {
         let mut ptr = null_mut::<sys::TRITONSERVER_InferenceTrace>();
-        let raw_handle = Arc::into_raw(handle.clone());
+        let raw_handle;
+        let with_tensor = tensor_activity_handler.is_some();
 
-        match triton_call!(sys::TRITONSERVER_InferenceTraceNew(
-            &mut ptr as *mut _,
-            level as u32,
-            parent_id,
-            Some(activity_wraper::<H>),
-            Some(delete::<H>),
-            raw_handle as *mut c_void,
-        )) {
+        let res = match tensor_activity_handler {
+            None => {
+                raw_handle = Arc::into_raw(Arc::new((activity_handler, ()))) as *mut c_void;
+                triton_call!(sys::TRITONSERVER_InferenceTraceNew(
+                    &mut ptr as *mut _,
+                    level.bits(),
+                    parent_id,
+                    Some(activity_wraper::<H, ()>),
+                    Some(delete::<H, ()>),
+                    raw_handle,
+                ))
+            }
+            Some(tensor_activity_handler) => {
+                raw_handle = Arc::into_raw(Arc::new((activity_handler, tensor_activity_handler)))
+                    as *mut c_void;
+                triton_call!(sys::TRITONSERVER_InferenceTraceTensorNew(
+                    &mut ptr as *mut _,
+                    level.bits(),
+                    parent_id,
+                    Some(activity_wraper::<H, T>),
+                    Some(tensor_activity_wrapper::<H, T>),
+                    Some(delete::<H, T>),
+                    raw_handle,
+                ))
+            }
+        };
+
+        match res {
             Ok(_) => {
                 assert!(!ptr.is_null());
                 Ok(Trace { ptr })
             }
             Err(err) => {
+                if with_tensor {
+                    unsafe {
+                        Arc::from_raw(raw_handle as *mut (H, T));
+                    }
+                }
                 unsafe {
-                    Arc::from_raw(raw_handle);
+                    Arc::from_raw(raw_handle as *mut (H, ()));
                 }
                 Err(err)
             }
         }
     }
 
+    /// Report a trace activity. All the traces reported using this API will be send [Activity::CustomActivity] type.
+    ///
+    /// `timestamp` The timestamp associated with the trace activity. \
+    /// `name` The trace activity name.
+    pub fn report_activity<N: AsRef<str>>(
+        &self,
+        timestamp: Duration,
+        activity_name: N,
+    ) -> Result<(), Error> {
+        let name = to_cstring(activity_name)?;
+        triton_call!(sys::TRITONSERVER_InferenceTraceReportActivity(
+            self.ptr,
+            timestamp.as_nanos() as _,
+            name.as_ptr()
+        ))
+    }
+
     /// Get the id associated with the trace.
     /// Every trace is assigned an id that is unique across all traces created for a Triton server.
-    pub fn get_id(&self) -> Result<u64, Error> {
+    pub fn id(&self) -> Result<u64, Error> {
         let mut id: u64 = 0;
         triton_call!(
             sys::TRITONSERVER_InferenceTraceId(self.ptr, &mut id as *mut _),
@@ -121,7 +246,7 @@ impl Trace {
     /// Get the parent id associated with the trace. \
     /// The parent id indicates a parent-child relationship between two traces.
     /// A parent id value of 0 indicates that there is no parent trace.
-    pub fn get_parent_id(&self) -> Result<u64, Error> {
+    pub fn parent_id(&self) -> Result<u64, Error> {
         let mut id: u64 = 0;
         triton_call!(
             sys::TRITONSERVER_InferenceTraceParentId(self.ptr, &mut id as *mut _),
@@ -130,30 +255,62 @@ impl Trace {
     }
 
     /// Get the name of the model associated with the trace.
-    pub fn get_model_name(&self) -> Result<&str, Error> {
-        let mut ptr = null::<c_char>();
-        triton_call!(sys::TRITONSERVER_InferenceTraceModelName(
-            self.ptr,
-            &mut ptr as *mut _
-        ))?;
-
-        assert!(!ptr.is_null());
-        Ok(unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap_or(CSTR_CONVERT_ERROR_PLUG))
+    pub fn model_name(&self) -> Result<String, Error> {
+        let mut name = null::<c_char>();
+        triton_call!(
+            sys::TRITONSERVER_InferenceTraceModelName(self.ptr, &mut name as *mut _),
+            from_char_array(name)
+        )
     }
 
     /// Get the version of the model associated with the trace.
-    pub fn get_model_version(&self) -> Result<i64, Error> {
+    pub fn model_version(&self) -> Result<i64, Error> {
         let mut version: i64 = 0;
         triton_call!(
             sys::TRITONSERVER_InferenceTraceModelVersion(self.ptr, &mut version as *mut _),
             version
         )
     }
+
+    /// Get the request id associated with a trace.
+    /// Returns the version of the model associated with the trace.
+    pub fn request_id(&self) -> Result<String, Error> {
+        let mut request_id = null::<c_char>();
+
+        triton_call!(
+            sys::TRITONSERVER_InferenceTraceRequestId(self.ptr, &mut request_id as *mut _),
+            from_char_array(request_id)
+        )
+    }
+
+    /// Returns the child trace, spawned from the parent(self) trace.
+    pub fn spawn_child(&self) -> Result<Trace, Error> {
+        let mut trace = null_mut();
+        triton_call!(
+            sys::TRITONSERVER_InferenceTraceSpawnChildTrace(self.ptr, &mut trace),
+            Trace { ptr: trace }
+        )
+    }
+
+    /// Set context to Triton Trace
+    pub fn set_context(&mut self, context: String) -> Result<&mut Self, Error> {
+        let context = to_cstring(context)?;
+        triton_call!(
+            sys::TRITONSERVER_InferenceTraceSetContext(self.ptr, context.as_ptr()),
+            self
+        )
+    }
+
+    /// Set context to Triton Trace
+    pub fn context(&mut self) -> Result<String, Error> {
+        let mut context = null::<c_char>();
+        triton_call!(
+            sys::TRITONSERVER_InferenceTraceContext(self.ptr, &mut context as *mut _),
+            from_char_array(context)
+        )
+    }
 }
 
-// It normally never being called.
 impl Drop for Trace {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
@@ -164,31 +321,78 @@ impl Drop for Trace {
     }
 }
 
-unsafe extern "C" fn delete<H: TraceHandler>(
+unsafe extern "C" fn delete<H: TraceHandler, T: TensorTraceHandler>(
     this: *mut sys::TRITONSERVER_InferenceTrace,
     userp: *mut c_void,
 ) {
     sys::TRITONSERVER_InferenceTraceDelete(this);
     if !userp.is_null() {
-        Arc::from_raw(userp as *mut H);
+        Arc::from_raw(userp as *mut (H, T));
     }
 }
 
-unsafe extern "C" fn activity_wraper<H: TraceHandler>(
+unsafe extern "C" fn activity_wraper<H: TraceHandler, T: TensorTraceHandler>(
     trace: *mut sys::TRITONSERVER_InferenceTrace,
     activity: sys::TRITONSERVER_InferenceTraceActivity,
     timestamp_ns: u64,
     userp: *mut ::std::os::raw::c_void,
 ) {
     if !userp.is_null() {
-        let handle = Arc::from_raw(userp as *mut H);
+        let handle = Arc::from_raw(userp as *mut (H, T));
 
         let trace = Trace { ptr: trace };
 
         let activity: Activity = transmute(activity);
         let timestamp = Duration::from_nanos(timestamp_ns);
 
-        handle.trace_activity(&trace, activity, timestamp);
+        handle.0.trace_activity(&trace, activity, timestamp);
+
+        // Drop will be in delete method.
+        forget(handle);
+        forget(trace);
+    }
+}
+
+unsafe extern "C" fn tensor_activity_wrapper<H: TraceHandler, T: TensorTraceHandler>(
+    trace: *mut sys::TRITONSERVER_InferenceTrace,
+    activity: sys::TRITONSERVER_InferenceTraceActivity,
+    name: *const ::std::os::raw::c_char,
+    datatype: sys::TRITONSERVER_DataType,
+    base: *const ::std::os::raw::c_void,
+    byte_size: usize,
+    shape: *const i64,
+    dim_count: u64,
+    memory_type: sys::TRITONSERVER_MemoryType,
+    _memory_type_id: i64,
+    userp: *mut ::std::os::raw::c_void,
+) {
+    if !userp.is_null() {
+        let handle = Arc::from_raw(userp as *mut (H, T));
+
+        let trace = Trace { ptr: trace };
+
+        let activity: Activity = transmute(activity);
+
+        let data_type = unsafe { transmute::<u32, crate::memory::DataType>(datatype) };
+        let memory_type: MemoryType = unsafe { transmute(memory_type) };
+
+        let tensor_shape = Shape {
+            name: from_char_array(name),
+            datatype: data_type,
+            dims: slice::from_raw_parts(shape, dim_count as _).to_vec(),
+        };
+
+        let tensor_data = Buffer {
+            ptr: base as *mut _,
+            len: byte_size,
+            data_type,
+            memory_type,
+            owned: false,
+        };
+
+        handle
+            .1
+            .trace_tensor_activity(&trace, activity, &tensor_data, tensor_shape);
 
         // Drop will be in delete method.
         forget(handle);

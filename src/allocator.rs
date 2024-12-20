@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    ffi::{c_void, CStr},
+    ffi::c_void,
     os::raw::{c_char, c_uint},
     ptr::null_mut,
     sync::{
@@ -13,7 +13,8 @@ use log::{error, trace};
 use tokio::{runtime::Handle, sync::RwLock};
 
 use crate::{
-    error::{Error, ErrorCode, CSTR_CONVERT_ERROR_PLUG},
+    error::{Error, ErrorCode},
+    from_char_array,
     memory::{Buffer, MemoryType},
     request::Allocator as AllocTrait,
     sys,
@@ -56,6 +57,14 @@ impl Allocator {
         ))?;
 
         assert!(!ptr.is_null());
+
+        if custom_allocator.enable_queries() {
+            triton_call!(sys::TRITONSERVER_ResponseAllocatorSetQueryFunction(
+                ptr,
+                Some(query)
+            ))?;
+        }
+
         Ok(Self(Arc::new(Inner {
             alloc: ptr,
             output_buffers: RwLock::new(HashMap::new()),
@@ -100,6 +109,7 @@ unsafe extern "C" fn alloc(
     tensor_name: *const c_char,
     byte_size: libc::size_t,
     memory_type: sys::TRITONSERVER_MemoryType,
+    // mem type id typically is the same as device id.
     memory_type_id: i64,
     userp: *mut c_void,
     buffer: *mut *mut c_void,
@@ -107,9 +117,7 @@ unsafe extern "C" fn alloc(
     actual_memory_type: *mut sys::TRITONSERVER_MemoryType,
     actual_memory_type_id: *mut i64,
 ) -> *mut sys::TRITONSERVER_Error {
-    let output_name = unsafe { CStr::from_ptr(tensor_name as *const c_char) }
-        .to_str()
-        .unwrap_or(CSTR_CONVERT_ERROR_PLUG);
+    let output_name = from_char_array(tensor_name);
 
     let mem_type = std::mem::transmute::<u32, MemoryType>(memory_type);
 
@@ -126,6 +134,7 @@ unsafe extern "C" fn alloc(
 
     let allocator_cloned = allocator.clone();
     let runtime = allocator.0.runtime.clone();
+    let output = output_name.clone();
     let allocation_result = std::thread::spawn(move || {
         runtime.block_on(async move {
             allocator_cloned
@@ -133,7 +142,7 @@ unsafe extern "C" fn alloc(
                 .custom_allocator
                 .write()
                 .await
-                .allocate(output_name.to_string(), mem_type, byte_size)
+                .allocate(output, mem_type, byte_size)
                 .await
         })
     })
@@ -224,6 +233,44 @@ unsafe extern "C" fn release(
 
     allocator.0.returned_buffers.fetch_add(1, Ordering::Relaxed);
     trace!("release is ended");
+
+    null_mut()
+}
+
+unsafe extern "C" fn query(
+    _allocator: *mut sys::TRITONSERVER_ResponseAllocator,
+    userp: *mut ::std::os::raw::c_void,
+    tensor_name: *const ::std::os::raw::c_char,
+    byte_size: *mut usize,
+    memory_type: *mut sys::TRITONSERVER_MemoryType,
+    _memory_type_id: *mut i64,
+) -> *mut sys::TRITONSERVER_Error {
+    let output_name = (!tensor_name.is_null()).then(|| from_char_array(tensor_name));
+    let byte_size = (!byte_size.is_null()).then(|| *byte_size);
+    let mem_type = std::mem::transmute::<u32, MemoryType>(*memory_type);
+
+    let allocator = match unsafe { (userp as *const Allocator).as_ref() } {
+        None => return Error::new(ErrorCode::Internal, "Got null userp in query method").ptr,
+        Some(alloc) => alloc.clone(),
+    };
+
+    let allocator_cloned = allocator.clone();
+    let runtime = allocator.0.runtime.clone();
+    let allocation_result = std::thread::spawn(move || {
+        runtime.block_on(async move {
+            allocator_cloned
+                .0
+                .custom_allocator
+                .write()
+                .await
+                .pre_allocation_query(output_name, byte_size, mem_type)
+                .await
+        })
+    })
+    .join()
+    .unwrap();
+
+    *memory_type = allocation_result as _;
 
     null_mut()
 }

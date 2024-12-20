@@ -160,7 +160,8 @@ pub(crate) mod sys {
         non_upper_case_globals,
         non_snake_case,
         dead_code,
-        unused_imports
+        unused_imports,
+        rustdoc::invalid_html_tags
     )]
     include!(concat!(env!("OUT_DIR"), "/tritonserver.rs"));
 }
@@ -178,7 +179,11 @@ pub use crate::{
 #[cfg(feature = "gpu")]
 pub use context::{get_context, init_cuda};
 
-use std::ffi::CString;
+use std::{
+    ffi::{CStr, CString},
+    os::{raw::c_char, unix::ffi::OsStrExt as _},
+    path::Path,
+};
 
 /// Get the TRITONBACKEND API version supported by the Triton library.
 /// This value can be compared against the TRITONSERVER_API_VERSION_MAJOR and TRITONSERVER_API_VERSION_MINOR used to build the client to ensure that Triton shared library is compatible with the client.
@@ -195,6 +200,25 @@ pub fn api_version() -> Result<(u32, u32), Error> {
 pub(crate) fn to_cstring<S: AsRef<str>>(value: S) -> Result<CString, Error> {
     CString::new(value.as_ref().as_bytes())
         .map_err(|err| Error::new(ErrorCode::InvalidArg, format!("{}", err)))
+}
+
+pub(crate) fn path_to_cstring<P: AsRef<Path>>(value: P) -> Result<CString, Error> {
+    value
+        .as_ref()
+        .canonicalize()
+        .map_err(|err| Error::new(ErrorCode::InvalidArg, err.to_string()))
+        .and_then(|path| {
+            CString::new(path.as_os_str().as_bytes())
+                .map_err(|err| Error::new(ErrorCode::InvalidArg, err.to_string()))
+        })
+}
+
+pub(crate) fn from_char_array(value: *const c_char) -> String {
+    assert!(!value.is_null());
+    unsafe { CStr::from_ptr(value) }
+        .to_str()
+        .unwrap_or(error::CSTR_CONVERT_ERROR_PLUG)
+        .to_string()
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     ffi::{c_char, c_int},
+    ptr::null_mut,
     sync::Arc,
 };
 
@@ -11,7 +12,7 @@ use cuda_driver_sys::{
 };
 use parking_lot::{Once, RwLock};
 
-use crate::error::Error;
+use crate::{error::Error, from_char_array};
 
 /// Initialize Cuda runtime. Should be called before any Cuda function, perfectly &mdash; on the start of the application.
 pub fn init_cuda() -> Result<(), Error> {
@@ -124,14 +125,12 @@ impl CuDevice {
 
     /// Get name of the device.
     pub fn get_name(&self) -> Result<String, Error> {
-        let mut name = vec![0; 256];
+        let name = null_mut::<c_char>();
 
-        cuda_call!(cuDeviceGetName(
-            name.as_mut_ptr() as *mut c_char,
-            name.len() as i32,
-            self.device,
-        ))
-        .map(|_| String::from_utf8(name).unwrap())
+        cuda_call!(
+            cuDeviceGetName(name, 256, self.device,),
+            from_char_array(name)
+        )
     }
 
     /// Get total mem of the device.

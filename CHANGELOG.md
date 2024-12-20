@@ -4,5 +4,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/3xMike/tritonserver-rs/tags/0.2.0) - 2024-12-20
+### Changed:
+- Folowwing bitflag structs with consts now enums (variant names changed to UpperCamelCase):
+    - metrics::Format,
+    - options::{Control, Limit},
+    - parameter::TritonParameterType,
+    - request::Sequence,
+    - server::{Batch, Transaction},
+    - 
+- trace::Level:
+    - now it's bitflag struct instead of enum (variant names changed to UPPER_CASE),
+    - MIN and MAX consts are depricated,
+    - added TIMESTAMPS and TENSORS consts.
+- Allocator trait now has 2 optional methods that implements queriing logic: `enable_queries()` and `pre_allocation_query()`.
+- request::Request::get_id() now returns `Result<String>` instead of `Result<&str>`.
+- request::Request::get_correlation_id_as_str() now is called get_correlation_id_as_string() and returns `Result<String>` instead of `Result<&str>`.
+- response::Response::id() now returns `Result<String>` instead of `Result<&str>`.
+- trace:
+    - Trace::new_with_handle() now takes optional TensorTrace object,
+    - Trace::{get_id(), get_parent_id(), get_model_name(), get_model_version()} now is called id(), parent_id(), model_name() and model_version() respectably,
+    - Trace::get_model_name() now returns `Result<String>` instead of `Result<&str>`.
+
+### Added:
+- enum variants memory::DataType::{Bf16, Invalid}.
+- options:
+    - enum Format,
+    - enum InstanceGroupKind,
+    - methods Options::{ \
+        &emsp;model_config_name(), cuda_virtual_address_size(), response_cache_directory(), \
+        &emsp;response_cache_config(), model_load_thread_count(), model_retry_count(), \
+        &emsp;peer_access(), model_namespacing(), log_file(), log_format(), \
+        &emsp;cpu_metrics(), model_load_device_limit(), metrics_config() \
+    }.
+- enum variant parameter::TritonParameterType::Double.
+- request:
+    - methods Request::{remove_input(), remove_all_inputs(), set_parameter()},
+    - Request now can be cancelled by dropping ResponseFuture.
+- server::Server::{set_exit_timeout(), register_model_repo(), unregister_model_repo(), is_log_enabled()}.
+- trace:
+    - better documentation,
+    - enum variants Activity::{TensorQueueInput, TensorBackendInput, TensorBackendOutput, CustomActivity},
+    - impl TraceHandler for (),
+    - trait TensorTraceHandler,
+    - impl PartialEq for Trace,
+    - methods Trace::{report_activity(), request_id(), spawn_child(), set_context(), context()}.
+
+
+### Depricated:
+- options::Options::response_cache_byte_size().
+- trace::Level::{MIN, MAX}.
+
 ## [0.1.0](https://github.com/3xMike/tritonserver-rs/tags/0.1.0) - 2024-12-04
 INITIAL STATE

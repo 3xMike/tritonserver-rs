@@ -4,7 +4,7 @@ use crate::{
     error::{Error, ErrorCode},
     memory::Buffer,
     request::infer::*,
-    Response,
+    sys, Response,
 };
 
 /// Awaiting on this structure will returt result of the inference: Ok([Response]) or Err([InferenceError]).
@@ -19,7 +19,9 @@ impl Future for ResponseFuture {
                 Ignore this message if there is no need to handle returned input resources. They will be dropped.
             ");
         }
-        unsafe { self.map_unchecked_mut(|this| &mut this.response_receiver) }
+        let request_canceller = self.request_ptr.clone();
+
+        let res = unsafe { self.map_unchecked_mut(|this| &mut this.response_receiver) }
             .poll(cx)
             .map(|recv_res| match recv_res {
                 Ok(res) => res,
@@ -28,7 +30,14 @@ impl Future for ResponseFuture {
                     format!("response receive error: {recv_err}"),
                 )
                 .into()),
-            })
+            });
+
+        if res.is_ready() {
+            request_canceller
+                .is_inferenced
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        res
     }
 }
 
@@ -39,14 +48,20 @@ impl ResponseFuture {
     ///
     /// This function panics if called within an asynchronous execution context.
     pub fn blocking_recv(self) -> Result<Response, InferenceError> {
-        match self.response_receiver.blocking_recv() {
+        let request_canceller = self.request_ptr.clone();
+        let res = match self.response_receiver.blocking_recv() {
             Ok(res) => res,
             Err(recv_err) => Err(Error::new(
                 ErrorCode::Internal,
                 format!("response receive error: {recv_err}"),
             )
             .into()),
-        }
+        };
+
+        request_canceller
+            .is_inferenced
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        res
     }
 
     /// Get the future to return the input buffers assigned to the Request.
@@ -60,6 +75,26 @@ impl ResponseFuture {
             let (_, rx) = tokio::sync::oneshot::channel();
             InputRelease(rx)
         })
+    }
+}
+
+impl RequestCanceller {
+    fn is_cancelled(&self) -> Result<bool, Error> {
+        let mut res = false;
+        triton_call!(
+            sys::TRITONSERVER_InferenceRequestIsCancelled(self.request_ptr, &mut res),
+            res
+        )
+    }
+}
+
+impl Drop for RequestCanceller {
+    fn drop(&mut self) {
+        if !self.is_inferenced.load(std::sync::atomic::Ordering::SeqCst)
+            && !self.is_cancelled().unwrap_or(true)
+        {
+            let _ = unsafe { sys::TRITONSERVER_InferenceRequestCancel(self.request_ptr) };
+        }
     }
 }
 

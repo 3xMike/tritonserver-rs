@@ -1,44 +1,46 @@
 use std::{
     collections::HashMap,
     ffi::{c_void, CStr},
+    mem::transmute,
+    path::Path,
     ptr::null_mut,
     sync::Arc,
+    time::Duration,
 };
 
-use bitflags::bitflags;
 use serde_json::{from_slice, Value};
 
 use crate::{
     message::{self, Index, Message, Model},
     metrics::{self, Metrics},
     options::Options,
-    parameter::Parameter,
-    sys, to_cstring, Error, ErrorCode, Request,
+    parameter::{Parameter, ParameterContent},
+    path_to_cstring, sys, to_cstring, Error, ErrorCode, Request,
 };
 
-bitflags! {
-    /// Batch properties of the model.
-    pub struct Batch: u32 {
-        /// Triton cannot determine the batching properties of the model.
-        /// This means that the model does not support batching in any way that is useable by Triton.
-        const UNKNOWN = sys::tritonserver_batchflag_enum_TRITONSERVER_BATCH_UNKNOWN;
-        /// The model supports batching along the first dimension of every input and output tensor.
-        /// Triton schedulers that perform batching can automatically batch inference requests along this dimension.
-        const FIRST_DIM = sys::tritonserver_batchflag_enum_TRITONSERVER_BATCH_FIRST_DIM;
-    }
+/// Batch properties of the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Batch {
+    /// Triton cannot determine the batching properties of the model.
+    /// This means that the model does not support batching in any way that is useable by Triton.
+    Unknown = sys::tritonserver_batchflag_enum_TRITONSERVER_BATCH_UNKNOWN,
+    /// The model supports batching along the first dimension of every input and output tensor.
+    /// Triton schedulers that perform batching can automatically batch inference requests along this dimension.
+    FirstDim = sys::tritonserver_batchflag_enum_TRITONSERVER_BATCH_FIRST_DIM,
 }
 
-bitflags! {
-    /// Transaction policy of the model.
-    pub struct Transaction: u32 {
-        /// The model generates exactly one response per request.
-        const ONE_TO_ONE = sys::tritonserver_txn_property_flag_enum_TRITONSERVER_TXN_ONE_TO_ONE;
-        /// The model may generate zero to many responses per request.
-        const DECOUPLED = sys::tritonserver_txn_property_flag_enum_TRITONSERVER_TXN_DECOUPLED;
-    }
+/// Transaction policy of the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Transaction {
+    /// The model generates exactly one response per request.
+    OneToOne = sys::tritonserver_txn_property_flag_enum_TRITONSERVER_TXN_ONE_TO_ONE,
+    /// The model may generate zero to many responses per request.
+    Decoupled = sys::tritonserver_txn_property_flag_enum_TRITONSERVER_TXN_DECOUPLED,
 }
 
-bitflags! {
+bitflags::bitflags! {
     /// Flags that control how to collect the index.
     pub struct State: u32 {
         /// If set in 'flags', only the models that are loaded into the server and ready for inferencing are returned.
@@ -205,6 +207,62 @@ impl Server {
         self.update_all_models()
     }
 
+    /// Set the exit timeout on the server object. This value overrides the value initially set through server options and provides a mechanism to update the exit timeout while the serving is running.
+    ///
+    /// `timeout` The exit timeout.
+    pub fn set_exit_timeout(&mut self, timeout: Duration) -> Result<&mut Self, Error> {
+        triton_call!(
+            sys::TRITONSERVER_ServerSetExitTimeout(self.ptr.as_mut_ptr(), timeout.as_secs() as _),
+            self
+        )
+    }
+
+    /// Register a new model repository. Not available in polling mode.
+    ///
+    /// `repository` The full path to the model repository. \
+    /// `name_mapping` List of name_mapping parameters.
+    /// Each mapping has the model directory name as its key,
+    /// overridden model name as its value.
+    pub fn register_model_repo<P: AsRef<Path>, N: AsRef<str>>(
+        &mut self,
+        repository: P,
+        name_mapping: HashMap<String, String>,
+    ) -> Result<&mut Self, Error> {
+        let path = path_to_cstring(repository)?;
+
+        let mut mapping_params = name_mapping
+            .into_iter()
+            .map(|(k, v)| {
+                Parameter::new(k, ParameterContent::String(v)).map(|param| param.ptr as *const _)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        triton_call!(
+            sys::TRITONSERVER_ServerRegisterModelRepository(
+                self.ptr.as_mut_ptr(),
+                path.as_ptr(),
+                mapping_params.as_mut_ptr(),
+                mapping_params.len() as _
+            ),
+            self
+        )
+    }
+
+    /// Unregister a model repository. Not available in polling mode.
+    ///
+    /// `repository_path` The full path to the model repository.
+    pub fn unregister_model_repo<P: AsRef<Path>, N: AsRef<str>>(
+        &mut self,
+        repository: P,
+    ) -> Result<&mut Self, Error> {
+        let path = path_to_cstring(repository)?;
+
+        triton_call!(
+            sys::TRITONSERVER_ServerUnregisterModelRepository(self.ptr.as_mut_ptr(), path.as_ptr()),
+            self
+        )
+    }
+
     /// Returns true if server is live, false otherwise.
     pub fn is_live(&self) -> Result<bool, Error> {
         self.ptr.is_live()
@@ -250,16 +308,14 @@ impl Server {
         let mut result: u32 = 0;
         let mut ptr = null_mut::<c_void>();
 
-        triton_call!(
-            sys::TRITONSERVER_ServerModelBatchProperties(
-                self.ptr.as_mut_ptr(),
-                name.as_ptr(),
-                version,
-                &mut result as *mut _,
-                &mut ptr as *mut _,
-            ),
-            unsafe { Batch::from_bits_unchecked(result) }
-        )
+        triton_call!(sys::TRITONSERVER_ServerModelBatchProperties(
+            self.ptr.as_mut_ptr(),
+            name.as_ptr(),
+            version,
+            &mut result as *mut _,
+            &mut ptr as *mut _,
+        ))?;
+        unsafe { Ok(transmute::<u32, Batch>(result)) }
     }
 
     /// Get the transaction policy of the model. \
@@ -274,16 +330,14 @@ impl Server {
         let mut result: u32 = 0;
         let mut ptr = null_mut::<c_void>();
 
-        triton_call!(
-            sys::TRITONSERVER_ServerModelTransactionProperties(
-                self.ptr.as_mut_ptr(),
-                name.as_ptr(),
-                version,
-                &mut result as *mut _,
-                &mut ptr as *mut _,
-            ),
-            unsafe { Transaction::from_bits_unchecked(result) }
-        )
+        triton_call!(sys::TRITONSERVER_ServerModelTransactionProperties(
+            self.ptr.as_mut_ptr(),
+            name.as_ptr(),
+            version,
+            &mut result as *mut _,
+            &mut ptr as *mut _,
+        ))?;
+        unsafe { Ok(transmute::<u32, Transaction>(result)) }
     }
 
     /// Get the metadata of the server as a Message(json) object.
@@ -479,4 +533,17 @@ impl Server {
         assert!(!metrics.is_null());
         Ok(Metrics(metrics))
     }
+
+    pub fn is_log_enabled(&self, level: LogLevel) -> bool {
+        unsafe { sys::TRITONSERVER_LogIsEnabled(level as u32) }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum LogLevel {
+    Info = sys::TRITONSERVER_loglevel_enum_TRITONSERVER_LOG_INFO,
+    Warn = sys::TRITONSERVER_loglevel_enum_TRITONSERVER_LOG_WARN,
+    Error = sys::TRITONSERVER_loglevel_enum_TRITONSERVER_LOG_ERROR,
+    Verbose = sys::TRITONSERVER_loglevel_enum_TRITONSERVER_LOG_VERBOSE,
 }

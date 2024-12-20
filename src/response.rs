@@ -17,6 +17,7 @@ use tokio::runtime::Handle;
 use crate::{
     allocator::Allocator,
     error::{Error, CSTR_CONVERT_ERROR_PLUG},
+    from_char_array,
     memory::{Buffer, DataType, MemoryType},
     parameter::{Parameter, ParameterContent},
     request::infer::InferenceError,
@@ -69,7 +70,6 @@ impl Output {
     pub fn classification_label(&self, class: u64) -> Result<String, Error> {
         self.parent_response
             .classification_label(self.index_in_parent_response, class)
-            .map(ToString::to_string)
     }
 }
 
@@ -208,7 +208,7 @@ impl Response {
     }
 
     /// Get the ID of the request corresponding to the response.
-    pub fn id(&self) -> Result<&str, Error> {
+    pub fn id(&self) -> Result<String, Error> {
         self.triton_ptr_wrapper.id()
     }
 
@@ -258,17 +258,12 @@ impl InferenceResponseWrapper {
     }
 
     /// Get the ID of the request corresponding to a response.
-    fn id(&self) -> Result<&str, Error> {
+    fn id(&self) -> Result<String, Error> {
         let mut id = null::<c_char>();
-        triton_call!(sys::TRITONSERVER_InferenceResponseId(
-            self.0,
-            &mut id as *mut _
-        ))?;
-
-        assert!(!id.is_null());
-        Ok(unsafe { CStr::from_ptr(id) }
-            .to_str()
-            .unwrap_or(CSTR_CONVERT_ERROR_PLUG))
+        triton_call!(
+            sys::TRITONSERVER_InferenceResponseId(self.0, &mut id as *mut _),
+            from_char_array(id)
+        )
     }
 
     /// Get the number of parameters available in the response.
@@ -388,7 +383,7 @@ impl InferenceResponseWrapper {
     }
 
     /// Get a classification label associated with an output for a given index.
-    fn classification_label(&self, index: u32, class: u64) -> Result<&str, Error> {
+    fn classification_label(&self, index: u32, class: u64) -> Result<String, Error> {
         let mut label = null::<c_char>();
         triton_call!(
             sys::TRITONSERVER_InferenceResponseOutputClassificationLabel(
@@ -396,13 +391,9 @@ impl InferenceResponseWrapper {
                 index,
                 class as usize,
                 &mut label as *mut _,
-            )
-        )?;
-
-        assert!(!label.is_null());
-        Ok(unsafe { CStr::from_ptr(label) }
-            .to_str()
-            .unwrap_or(CSTR_CONVERT_ERROR_PLUG))
+            ),
+            from_char_array(label)
+        )
     }
 }
 

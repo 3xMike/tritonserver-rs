@@ -1,17 +1,16 @@
 use std::{fs::File, path::Path, ptr::null_mut};
 
-use bitflags::bitflags;
-
 use crate::{error::Error, sys, to_cstring};
 
-bitflags! {
-    /// Types of parameters recognized by TRITONSERVER.
-    pub struct TritonParameterType: u32 {
-        const STRING = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_STRING;
-        const INT = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_INT;
-        const BOOL = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_BOOL;
-        const BYTES = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_BYTES;
-    }
+/// Types of parameters recognized by TRITONSERVER.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum TritonParameterType {
+    String = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_STRING,
+    Int = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_INT,
+    Bool = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_BOOL,
+    Double = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_DOUBLE,
+    Bytes = sys::TRITONSERVER_parametertype_enum_TRITONSERVER_PARAMETER_BYTES,
 }
 
 /// Enum representation of Parameter content.
@@ -20,6 +19,7 @@ pub enum ParameterContent {
     String(String),
     Int(i64),
     Bool(bool),
+    Double(f64),
     Bytes(Vec<u8>),
 }
 
@@ -41,14 +41,14 @@ impl Parameter {
             ParameterContent::Bool(v) => unsafe {
                 sys::TRITONSERVER_ParameterNew(
                     c_name.as_ptr(),
-                    TritonParameterType::BOOL.bits(),
+                    TritonParameterType::Bool as _,
                     v as *const bool as *const _,
                 )
             },
             ParameterContent::Int(v) => unsafe {
                 sys::TRITONSERVER_ParameterNew(
                     c_name.as_ptr(),
-                    TritonParameterType::INT.bits(),
+                    TritonParameterType::Int as _,
                     v as *const i64 as *const _,
                 )
             },
@@ -57,11 +57,18 @@ impl Parameter {
                 unsafe {
                     sys::TRITONSERVER_ParameterNew(
                         c_name.as_ptr(),
-                        TritonParameterType::STRING.bits(),
+                        TritonParameterType::String as _,
                         v.as_ptr() as *const _,
                     )
                 }
             }
+            ParameterContent::Double(v) => unsafe {
+                sys::TRITONSERVER_ParameterNew(
+                    c_name.as_ptr(),
+                    TritonParameterType::Double as _,
+                    v as *const f64 as *const _,
+                )
+            },
             ParameterContent::Bytes(v) => unsafe {
                 sys::TRITONSERVER_ParameterBytesNew(
                     c_name.as_ptr(),

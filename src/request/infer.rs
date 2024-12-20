@@ -1,4 +1,10 @@
-use std::{collections::HashMap, ffi::c_void, mem::forget, ptr::null_mut, sync::Arc};
+use std::{
+    collections::HashMap,
+    ffi::c_void,
+    mem::forget,
+    ptr::null_mut,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use log::trace;
 use tokio::{
@@ -37,13 +43,22 @@ impl std::fmt::Display for InferenceError {
 
 impl std::error::Error for InferenceError {}
 
-/// Future that returns the inference response.
+/// Future that returns the inference response. \
+/// The request can be cancelled by dropping this structure.
 ///
 /// Also the input buffers assigned to the request can be returned via [get_input_release](ResponseFuture::get_input_release).
 pub struct ResponseFuture {
     pub(super) response_receiver: Receiver<Result<Response, InferenceError>>,
     pub(super) input_release: Option<InputRelease>,
+    pub(super) request_ptr: Arc<RequestCanceller>,
 }
+
+pub(super) struct RequestCanceller {
+    pub(crate) is_inferenced: AtomicBool,
+    pub(crate) request_ptr: *mut sys::TRITONSERVER_InferenceRequest,
+}
+unsafe impl Send for RequestCanceller {}
+unsafe impl Sync for RequestCanceller {}
 
 /// Struct that returns input buffers assigned to the request. \
 /// Note: input buffer can be released in any time from the start of the inference
@@ -155,6 +170,10 @@ impl Request<'_> {
         Ok(ResponseFuture {
             response_receiver: response_rx,
             input_release: Some(InputRelease(input_rx)),
+            request_ptr: Arc::new(RequestCanceller {
+                request_ptr,
+                is_inferenced: AtomicBool::new(false),
+            }),
         })
     }
 }

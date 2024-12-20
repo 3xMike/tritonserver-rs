@@ -14,6 +14,19 @@ macro_rules! cuda_call {
             std::result::Result::<_, $crate::error::Error>::Ok(())
         }
     }};
+    ($expr: expr, $val: expr) => {{
+        #[allow(clippy::macro_metavars_in_unsafe)]
+        let res = unsafe { $expr };
+
+        if res != cuda_driver_sys::CUresult::CUDA_SUCCESS {
+            Err($crate::error::Error::new(
+                $crate::error::ErrorCode::Internal,
+                format!("Cuda result: {:?}", res),
+            ))
+        } else {
+            std::result::Result::<_, $crate::error::Error>::Ok($val)
+        }
+    }};
 }
 
 /// Run triton method and get the Result<(), tritonserver_rs::Error> instead of cuda_driver_sys::CUresult.
