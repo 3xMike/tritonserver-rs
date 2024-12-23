@@ -3,7 +3,7 @@ ARG DEV_IMAGE
 FROM ${DEV_IMAGE}
 # Install the curl and build-essential packages
 RUN apt-get update && \
-    apt install python3 && \
+    apt install -y python3 && \
     apt-get install -y --no-install-recommends \
     python3-pip
 

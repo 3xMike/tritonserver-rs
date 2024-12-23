@@ -65,7 +65,7 @@ $ docker run -it --rm --network=host --shm-size=128Mb \
 ---
 
 ### **2. Simple Model**  
-A minimal example of creating a custom model. The model sums up all tensor values. Written in Python.  
+A minimal example of creating a custom model. The model sums up all tensor values. Written in Python. It also serves as custom tracing and allocation example.
 
 **Command:**  
 ```sh

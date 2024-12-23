@@ -197,7 +197,13 @@ impl Buffer {
         Self::alloc_with_data_type(count, memory_type, T::DATA_TYPE)
     }
 
-    pub(crate) fn alloc_with_data_type(
+    /// Allocate new buffer of requested memory type.\
+    /// `count`: size of buffer in `T` units (i.e. 128 chunks of f32 (that has byte size 512) should be allocated with `count=128`).\
+    /// `memory_type`: Cpu/Pinned/Gpu.\
+    /// `data_type`: type of Samples.
+    ///
+    /// **Note**: If memory type is not Cpu, should be called in sync with cuda context pinned (check module level documentation for more info).
+    pub fn alloc_with_data_type(
         count: usize,
         memory_type: MemoryType,
         data_type: DataType,

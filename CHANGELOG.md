@@ -14,21 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - parameter::TritonParameterType,
     - request::Sequence,
     - server::{Batch, Transaction}.
-- trace::Level:
-    - now it's bitflag struct instead of enum (variant names changed to UPPER_CASE),
-    - MIN and MAX consts are depricated,
-    - added TIMESTAMPS and TENSORS consts.
 - Allocator trait now has 2 optional methods that implements queriing logic: `enable_queries()` and `pre_allocation_query()`.
-- request::Request::get_id() now returns `Result<String>` instead of `Result<&str>`.
-- request::Request::get_correlation_id_as_str() now is called get_correlation_id_as_string() and returns `Result<String>` instead of `Result<&str>`.
+- request:
+    - Allocator::allocate now takes 4th argument: DataType,
+    - DefaultAllocator now has no methods and impl Copy,
+    - Request::get_id() now returns `Result<String>` instead of `Result<&str>`,
+    - Request::get_correlation_id_as_str() now is called get_correlation_id_as_string() and returns `Result<String>` instead of `Result<&str>`.
 - response::Response::id() now returns `Result<String>` instead of `Result<&str>`.
 - trace:
-    - Trace::new_with_handle() now takes optional TensorTrace object,
+    - enum Level deleted,
+    - Trace::new_with_handle() now takes parent_id, `Option<TraceHandler>` and `Option<TensorTraceHandler>` ,
+    - trait TraceHandler now requires Send + Sync
     - Trace::{get_id(), get_parent_id(), get_model_name(), get_model_version()} now is called id(), parent_id(), model_name() and model_version() respectably,
     - Trace::get_model_name() now returns `Result<String>` instead of `Result<&str>`.
 
 ### Added:
 - enum variants memory::DataType::{Bf16, Invalid}.
+- memory::Buffer::alloc_with_data_type().
 - options:
     - enum Format,
     - enum InstanceGroupKind,
@@ -49,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - impl TraceHandler for (),
     - trait TensorTraceHandler,
     - impl PartialEq for Trace,
+    - const NOOP, 
     - methods Trace::{report_activity(), request_id(), spawn_child(), set_context(), context()}.
 
 ### Depricated:

@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     ffi::c_void,
-    mem::forget,
     ptr::null_mut,
     sync::{atomic::AtomicBool, Arc},
 };
@@ -92,7 +91,7 @@ impl Request<'_> {
         let trace = self.custom_trace.take();
 
         // Add outputs.
-        self.add_outputs()?;
+        let datatype_hints = self.add_outputs()?;
         let outputs_count = self.server.get_model(&self.model_name)?.outputs.len();
 
         let runtime = self.server.runtime.clone();
@@ -132,7 +131,11 @@ impl Request<'_> {
         // Так как Allocator используется тритоном в методе release, который вызывается после удаления Response,
         // необходимо отправить алокатор в response_wrapper -> Response, чтобы Arc не дропнулся раньше времени.
         // Имена буферов отправляется в response_wrapper, на нем будем ждать возвращенные буферы для Response.
-        let allocator = Arc::new(Allocator::new(custom_allocator, runtime.clone())?);
+        let allocator = Arc::new(Allocator::new(
+            custom_allocator,
+            datatype_hints,
+            runtime.clone(),
+        )?);
 
         let allocator_ptr = Arc::as_ptr(&allocator);
         // response_tx отправляется в response_wrapper,
@@ -155,7 +158,7 @@ impl Request<'_> {
 
         let trace_ptr = trace
             .as_ref()
-            .map(|trace| trace.ptr)
+            .map(|trace| trace.ptr.0)
             .unwrap_or_else(null_mut);
 
         triton_call!(sys::TRITONSERVER_ServerInferAsync(
@@ -164,8 +167,9 @@ impl Request<'_> {
             trace_ptr
         ))?;
 
-        // Do not drop the trace, it drops in trace::release_fn
-        let _ = trace.map(forget);
+        if let Some(trace) = trace {
+            std::mem::forget(trace.ptr);
+        }
 
         Ok(ResponseFuture {
             response_receiver: response_rx,

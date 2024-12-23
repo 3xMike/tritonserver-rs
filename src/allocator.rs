@@ -15,7 +15,7 @@ use tokio::{runtime::Handle, sync::RwLock};
 use crate::{
     error::{Error, ErrorCode},
     from_char_array,
-    memory::{Buffer, MemoryType},
+    memory::{Buffer, DataType, MemoryType},
     request::Allocator as AllocTrait,
     sys,
 };
@@ -29,6 +29,7 @@ pub(crate) struct Inner {
     pub(crate) returned_buffers: AtomicU32,
     /// User is responsible for buffers allocation.
     custom_allocator: RwLock<Box<dyn AllocTrait>>,
+    datatype_hints: HashMap<String, DataType>,
     /// To run async code in sync C fn
     runtime: Handle,
 }
@@ -46,6 +47,7 @@ impl Clone for Allocator {
 impl Allocator {
     pub(crate) fn new(
         custom_allocator: Box<dyn AllocTrait>,
+        datatype_hints: HashMap<String, DataType>,
         runtime: Handle,
     ) -> Result<Self, Error> {
         let mut ptr = null_mut::<sys::TRITONSERVER_ResponseAllocator>();
@@ -69,6 +71,7 @@ impl Allocator {
             alloc: ptr,
             output_buffers: RwLock::new(HashMap::new()),
             alloc_called: AtomicBool::new(false),
+            datatype_hints,
             returned_buffers: AtomicU32::new(0),
             custom_allocator: RwLock::new(custom_allocator),
             runtime,
@@ -128,6 +131,17 @@ unsafe extern "C" fn alloc(
         Some(alloc) => alloc.clone(),
     };
 
+    let data_type = match allocator.0.datatype_hints.get(&output_name) {
+        Some(dt) => *dt,
+        None => {
+            return Error::new(
+                ErrorCode::Internal,
+                format!("Can't find datatype of tensor: {output_name}"),
+            )
+            .ptr
+        }
+    };
+
     // Оповещаем, что произошла алокация.
     allocator.0.alloc_called.store(true, Ordering::Relaxed);
     // Достаем буфер-пару, соответствующий указанному имени.
@@ -142,7 +156,7 @@ unsafe extern "C" fn alloc(
                 .custom_allocator
                 .write()
                 .await
-                .allocate(output, mem_type, byte_size)
+                .allocate(output, mem_type, byte_size, data_type)
                 .await
         })
     })

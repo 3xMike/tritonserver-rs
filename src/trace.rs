@@ -73,7 +73,7 @@ bitflags::bitflags! {
     /// Trace level values can be combined to trace multiple types of activities. For example, use
     /// ([Level::TIMESTAMPS] | [Level::TENSORS]) to trace both timestamps and
     ///  tensors for an inference request.
-    pub struct Level: u32 {
+    struct Level: u32 {
         /// Tracing disabled. No trace activities are reported.
         const DISABLED = sys::tritonserver_tracelevel_enum_TRITONSERVER_TRACE_LEVEL_DISABLED;
         /// Deprecated. Use [Level::TIMESTAMPS].
@@ -90,8 +90,9 @@ bitflags::bitflags! {
 }
 
 impl Level {
+    #[allow(dead_code)]
     /// Get the string representation of a trace level.
-    pub fn as_str(self) -> &'static str {
+    fn as_str(self) -> &'static str {
         unsafe {
             let ptr = sys::TRITONSERVER_InferenceTraceLevelString(self.bits());
             assert!(!ptr.is_null());
@@ -123,22 +124,25 @@ pub enum Activity {
 }
 
 /// Inference event handler trait.
-pub trait TraceHandler: Send + 'static {
+pub trait TraceHandler: Send + Sync + 'static {
     /// This function is invoked each time the `event` occures.
     ///
     /// `trace`: Trace object that was reported.
     /// Note that child traces of constructed one also are reported with this fn.
     /// Check [Trace::new_with_handle] for more info.\
     /// `event`: activity that has occurred. \
-    /// `event_time`: time when event occured.
+    /// `event_time`: time when event occured. \
+    ///     Triton Trace APIs report timestamps using steady clock, which is a monotonic clock that ensures time always movess forward.
+    ///     This clock is not related to wall clock time and, for example, can measure time since last reboot (aka /proc/uptime).
     fn trace_activity(&self, trace: &Trace, event: Activity, event_time: Duration);
 }
 
 impl TraceHandler for () {
     fn trace_activity(&self, _trace: &Trace, _event: Activity, _event_time: Duration) {}
 }
+
 /// Tensor event handler trait.
-pub trait TensorTraceHandler: Send + 'static {
+pub trait TensorTraceHandler: Send + Sync + 'static {
     /// This function is invoked each time the tensor `event` occures.
     ///
     /// `trace`: Trace object that was reported.
@@ -167,12 +171,33 @@ impl TensorTraceHandler for () {
     }
 }
 
+/// Can be passed to [Trace::new_with_handle] if no TENSORS or TIMESTAMPS are needed.
+pub const NOOP: Option<()> = None;
+
+struct TraceCallbackItems<H: TraceHandler, T: TensorTraceHandler> {
+    activity_handler: Option<H>,
+    tensor_activity_handler: Option<T>,
+}
+
+/// Don't want to use annotations like Trace<H, T> for
+/// handlers_copy: Arc<TraceCallbackItems<H,T>>, so will use Arc<dyn DynamicTypeHelper>.
+///
+/// If someone can teach me how to do it better, i'm all ears((.
+trait DynamicTypeHelper: Send + Sync {}
+impl<H: TraceHandler, T: TensorTraceHandler> DynamicTypeHelper for TraceCallbackItems<H, T> {}
+
 /// Inference object that provides custom tracing.
 ///
 /// Is constructed with [TraceHandler] object that is activated each time an event occures.
 pub struct Trace {
-    pub(crate) ptr: *mut sys::TRITONSERVER_InferenceTrace,
+    pub(crate) ptr: TraceInner,
+    /// So callback won't be dropped if trace reports after the fn delete (inference).
+    handlers_copy: Arc<dyn DynamicTypeHelper>,
 }
+
+pub(crate) struct TraceInner(pub(crate) *mut sys::TRITONSERVER_InferenceTrace);
+unsafe impl Send for TraceInner {}
+unsafe impl Sync for TraceInner {}
 
 impl PartialEq for Trace {
     fn eq(&self, other: &Self) -> bool {
@@ -199,7 +224,7 @@ impl Trace {
     /// Create a new inference trace object.
     ///
     /// The `activity_handler` and `tensor_activity_handler` will be called to report activity
-    /// for this trace as well as for __every__ child traces that are spawned
+    /// including [Trace::report_activity] called by this trace as well as by __every__ child traces that are spawned
     /// by this one. So the [TraceHandler::trace_activity] and [TensorTraceHandler::trace_tensor_activity]
     /// should check the trace object (first argument) that are passed to it
     /// to determine specifically what trace was reported.
@@ -212,59 +237,43 @@ impl Trace {
     /// `tensor_activity_handler`: Optional callback function where activity (on tensor event)
     /// for the trace (and all the child traces) is reported.
     pub fn new_with_handle<H: TraceHandler, T: TensorTraceHandler>(
-        level: Level,
         parent_id: u64,
-        activity_handler: H,
+        activity_handler: Option<H>,
         tensor_activity_handler: Option<T>,
     ) -> Result<Self, Error> {
-        let mut ptr = null_mut::<sys::TRITONSERVER_InferenceTrace>();
-        let raw_handle;
-        let with_tensor = tensor_activity_handler.is_some();
+        let enable_activity = activity_handler.is_some();
+        let enable_tensor_activity = tensor_activity_handler.is_some();
 
-        let res = match tensor_activity_handler {
-            None => {
-                raw_handle = Arc::into_raw(Arc::new((activity_handler, ()))) as *mut c_void;
-                triton_call!(sys::TRITONSERVER_InferenceTraceNew(
-                    &mut ptr as *mut _,
-                    level.bits(),
-                    parent_id,
-                    Some(activity_wraper::<H, ()>),
-                    Some(delete::<H, ()>),
-                    raw_handle,
-                ))
-            }
-            Some(tensor_activity_handler) => {
-                raw_handle = Arc::into_raw(Arc::new((activity_handler, tensor_activity_handler)))
-                    as *mut c_void;
-                triton_call!(sys::TRITONSERVER_InferenceTraceTensorNew(
-                    &mut ptr as *mut _,
-                    level.bits(),
-                    parent_id,
-                    Some(activity_wraper::<H, T>),
-                    Some(tensor_activity_wrapper::<H, T>),
-                    Some(delete::<H, T>),
-                    raw_handle,
-                ))
-            }
+        let level = match (enable_activity, enable_tensor_activity) {
+            (true, true) => Level::TENSORS | Level::TIMESTAMPS,
+            (true, false) => Level::TIMESTAMPS,
+            (false, true) => Level::TENSORS,
+            (false, false) => Level::DISABLED,
         };
 
-        match res {
-            Ok(_) => {
-                assert!(!ptr.is_null());
-                Ok(Trace { ptr })
-            }
-            Err(err) => {
-                if with_tensor {
-                    unsafe {
-                        Arc::from_raw(raw_handle as *mut (H, T));
-                    }
-                }
-                unsafe {
-                    Arc::from_raw(raw_handle as *mut (H, ()));
-                }
-                Err(err)
-            }
-        }
+        let mut ptr = null_mut::<sys::TRITONSERVER_InferenceTrace>();
+        let handlers = Arc::new(TraceCallbackItems {
+            activity_handler,
+            tensor_activity_handler,
+        });
+        let raw_handlers = Arc::into_raw(handlers.clone()) as *mut c_void;
+
+        triton_call!(sys::TRITONSERVER_InferenceTraceTensorNew(
+            &mut ptr as *mut _,
+            level.bits(),
+            parent_id,
+            enable_activity.then_some(activity_wraper::<H, T>),
+            enable_tensor_activity.then_some(tensor_activity_wrapper::<H, T>),
+            Some(delete::<H, T>),
+            raw_handlers,
+        ))?;
+
+        assert!(!ptr.is_null());
+        let trace = Trace {
+            ptr: TraceInner(ptr),
+            handlers_copy: handlers,
+        };
+        Ok(trace)
     }
 
     /// Report a trace activity. All the traces reported using this API will be send [Activity::CustomActivity] type.
@@ -278,7 +287,7 @@ impl Trace {
     ) -> Result<(), Error> {
         let name = to_cstring(activity_name)?;
         triton_call!(sys::TRITONSERVER_InferenceTraceReportActivity(
-            self.ptr,
+            self.ptr.0,
             timestamp.as_nanos() as _,
             name.as_ptr()
         ))
@@ -289,7 +298,7 @@ impl Trace {
     pub fn id(&self) -> Result<u64, Error> {
         let mut id: u64 = 0;
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceId(self.ptr, &mut id as *mut _),
+            sys::TRITONSERVER_InferenceTraceId(self.ptr.0, &mut id as *mut _),
             id
         )
     }
@@ -300,7 +309,7 @@ impl Trace {
     pub fn parent_id(&self) -> Result<u64, Error> {
         let mut id: u64 = 0;
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceParentId(self.ptr, &mut id as *mut _),
+            sys::TRITONSERVER_InferenceTraceParentId(self.ptr.0, &mut id as *mut _),
             id
         )
     }
@@ -309,7 +318,7 @@ impl Trace {
     pub fn model_name(&self) -> Result<String, Error> {
         let mut name = null::<c_char>();
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceModelName(self.ptr, &mut name as *mut _),
+            sys::TRITONSERVER_InferenceTraceModelName(self.ptr.0, &mut name as *mut _),
             from_char_array(name)
         )
     }
@@ -318,7 +327,7 @@ impl Trace {
     pub fn model_version(&self) -> Result<i64, Error> {
         let mut version: i64 = 0;
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceModelVersion(self.ptr, &mut version as *mut _),
+            sys::TRITONSERVER_InferenceTraceModelVersion(self.ptr.0, &mut version as *mut _),
             version
         )
     }
@@ -329,44 +338,50 @@ impl Trace {
         let mut request_id = null::<c_char>();
 
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceRequestId(self.ptr, &mut request_id as *mut _),
+            sys::TRITONSERVER_InferenceTraceRequestId(self.ptr.0, &mut request_id as *mut _),
             from_char_array(request_id)
         )
     }
 
     /// Returns the child trace, spawned from the parent(self) trace.
+    ///
+    /// Be causious: Trace is deleting on drop, so don't forget to save it.
+    /// Also do not use parent and child traces for different Requests: it can lead to Seq Faults.
     pub fn spawn_child(&self) -> Result<Trace, Error> {
         let mut trace = null_mut();
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceSpawnChildTrace(self.ptr, &mut trace),
-            Trace { ptr: trace }
+            sys::TRITONSERVER_InferenceTraceSpawnChildTrace(self.ptr.0, &mut trace),
+            Trace {
+                ptr: TraceInner(trace),
+                handlers_copy: self.handlers_copy.clone(),
+            }
         )
     }
 
-    /// Set context to Triton Trace
+    /// Set context to Triton Trace.
     pub fn set_context(&mut self, context: String) -> Result<&mut Self, Error> {
         let context = to_cstring(context)?;
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceSetContext(self.ptr, context.as_ptr()),
+            sys::TRITONSERVER_InferenceTraceSetContext(self.ptr.0, context.as_ptr()),
             self
         )
     }
 
-    /// Set context to Triton Trace
-    pub fn context(&mut self) -> Result<String, Error> {
+    /// Get Triton Trace context.
+    pub fn context(&self) -> Result<String, Error> {
         let mut context = null::<c_char>();
         triton_call!(
-            sys::TRITONSERVER_InferenceTraceContext(self.ptr, &mut context as *mut _),
+            sys::TRITONSERVER_InferenceTraceContext(self.ptr.0, &mut context as *mut _),
             from_char_array(context)
         )
     }
 }
 
-impl Drop for Trace {
+impl Drop for TraceInner {
     fn drop(&mut self) {
-        if !self.ptr.is_null() {
+        if !self.0.is_null() {
             unsafe {
-                sys::TRITONSERVER_InferenceTraceDelete(self.ptr);
+                sys::TRITONSERVER_InferenceTraceDelete(self.0);
             }
         }
     }
@@ -376,9 +391,9 @@ unsafe extern "C" fn delete<H: TraceHandler, T: TensorTraceHandler>(
     this: *mut sys::TRITONSERVER_InferenceTrace,
     userp: *mut c_void,
 ) {
-    sys::TRITONSERVER_InferenceTraceDelete(this);
-    if !userp.is_null() {
-        Arc::from_raw(userp as *mut (H, T));
+    if !userp.is_null() && !this.is_null() {
+        sys::TRITONSERVER_InferenceTraceDelete(this);
+        Arc::from_raw(userp as *const TraceCallbackItems<H, T>);
     }
 }
 
@@ -389,18 +404,22 @@ unsafe extern "C" fn activity_wraper<H: TraceHandler, T: TensorTraceHandler>(
     userp: *mut ::std::os::raw::c_void,
 ) {
     if !userp.is_null() {
-        let handle = Arc::from_raw(userp as *mut (H, T));
-
-        let trace = Trace { ptr: trace };
-
+        let handle = Arc::from_raw(userp as *const TraceCallbackItems<H, T>);
+        let foo_trace = Trace {
+            ptr: TraceInner(trace),
+            handlers_copy: handle.clone(),
+        };
         let activity: Activity = transmute(activity);
+
         let timestamp = Duration::from_nanos(timestamp_ns);
 
-        handle.0.trace_activity(&trace, activity, timestamp);
+        if let Some(activity_handle) = handle.activity_handler.as_ref() {
+            activity_handle.trace_activity(&foo_trace, activity, timestamp)
+        };
 
         // Drop will be in delete method.
         forget(handle);
-        forget(trace);
+        forget(foo_trace.ptr);
     }
 }
 
@@ -418,10 +437,12 @@ unsafe extern "C" fn tensor_activity_wrapper<H: TraceHandler, T: TensorTraceHand
     userp: *mut ::std::os::raw::c_void,
 ) {
     if !userp.is_null() {
-        let handle = Arc::from_raw(userp as *mut (H, T));
+        let handle = Arc::from_raw(userp as *const TraceCallbackItems<H, T>);
 
-        let trace = Trace { ptr: trace };
-
+        let foo_trace = Trace {
+            ptr: TraceInner(trace),
+            handlers_copy: handle.clone(),
+        };
         let activity: Activity = transmute(activity);
 
         let data_type = unsafe { transmute::<u32, crate::memory::DataType>(datatype) };
@@ -441,12 +462,17 @@ unsafe extern "C" fn tensor_activity_wrapper<H: TraceHandler, T: TensorTraceHand
             owned: false,
         };
 
-        handle
-            .1
-            .trace_tensor_activity(&trace, activity, &tensor_data, tensor_shape);
+        if let Some(tensor_activity_handler) = handle.tensor_activity_handler.as_ref() {
+            tensor_activity_handler.trace_tensor_activity(
+                &foo_trace,
+                activity,
+                &tensor_data,
+                tensor_shape,
+            )
+        };
 
-        // Drop will be in delete method.
         forget(handle);
-        forget(trace);
+        forget(foo_trace.ptr);
+        // Drop will be in delete method.
     }
 }

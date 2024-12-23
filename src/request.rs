@@ -28,8 +28,9 @@ pub enum Sequence {
 }
 
 /// Allocator, that user provides in order to allocate output buffers when they are needed for Triton. \
-/// [Allocator::allocate] will be invoked after [Request::infer_async] call once for each model's output. The name of the requested output, it's memory type
-/// and byte size are passed as arguments.
+/// [Allocator::allocate] will be invoked after [Request::infer_async] call once for each model's output.
+/// The name of the requested output, it's memory type,
+/// byte size and data type are passed as arguments.
 ///
 /// Allocator should be able to allocate buffer for each model's output.
 ///
@@ -40,8 +41,9 @@ pub trait Allocator: Send {
     /// Allocate output buffer for output with name `tensor_name`.
     ///
     /// **NOTES:**:
-    /// - It's not necessary to allocate buffer on exact requested_memory_type: for example, it's fine to allocate buffer on Pinned when Triton requested GPU buffer.
-    ///   The only requirement is not to allocate CPU memory when GPU is requested and vice versa.
+    /// - It's not necessary to allocate buffer on exact requested_memory_type: for example,
+    ///     it's fine to allocate buffer on Pinned when Triton requested GPU buffer.
+    ///     The only requirement is not to allocate CPU memory when GPU is requested and vice versa.
     /// - Buffer of greater or equal size than requested `byte_size` can be allocated but not the smaller.
     /// - Allocated buffer's datatype must match this output datatype specified in the model's config.
     /// - Method will be invoked in asynchronous context.
@@ -50,6 +52,7 @@ pub trait Allocator: Send {
         tensor_name: String,
         requested_memory_type: MemoryType,
         byte_size: usize,
+        data_type: DataType,
     ) -> Result<Buffer, Error>;
 
     /// Unable or not a pre allocation queriing. For more info about queriing see [Allocator::pre_allocation_query]. \
@@ -81,76 +84,28 @@ pub trait Allocator: Send {
 
 /// Default allocator.
 ///
-/// Will allocate exact `byte_size` bytes (datatype &ndash `u8`) of `requested_memory_type` for each output.
-///
-/// If tensor types provided via [add_tensor_type](DefaultAllocator::add_tensor_type) or [with_tensors_types](DefaultAllocator::with_tensors_types)
-/// corresponding datatypes will be used for each output (instead of `u8`).
-///
-/// Note that if you use methods above, all the models outputs must be provided as hints.
-/// If only few of models output is provided via methods above,
-/// the DefaultAllocator::allocate will return [ErrorCode::NotFound] error on missing outputs.
-#[derive(Debug, Default, Clone)]
-pub struct DefaultAllocator {
-    tensor_types: HashMap<String, DataType>,
-}
-
-impl DefaultAllocator {
-    /// Create new DefaultAllocator.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add output tensor type hint. I.e. Buffer of `data_type` data type will be allocated for output tensor `tensor_name`.
-    ///
-    /// Note that if you use this method, all the models outputs must be provided as hints.
-    /// If only few of models output is provided,
-    /// the DefaultAllocator::allocate will return [ErrorCode::NotFound] error on missing outputs.
-    pub fn add_tensor_type<N: AsRef<str>>(&mut self, tensor_name: N, data_type: DataType) {
-        let _ = self
-            .tensor_types
-            .insert(tensor_name.as_ref().to_string(), data_type);
-    }
-
-    /// Create DefaultAllocator with output tensors data type hints `tensor_types`.
-    ///
-    /// Note that if you use this method, all the models outputs must be provided as hints.
-    /// If only few of models output is provided,
-    /// the DefaultAllocator::allocate will return [ErrorCode::NotFound] error on missing outputs.
-    pub fn with_tensors_types(tensor_types: HashMap<String, DataType>) -> Self {
-        Self { tensor_types }
-    }
-}
+/// Will allocate exact `byte_size` bytes of datatype `data_type` of `requested_memory_type` for each output.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DefaultAllocator;
 
 #[async_trait::async_trait]
 impl Allocator for DefaultAllocator {
     async fn allocate(
         &mut self,
-        tensor_name: String,
+        _tensor_name: String,
         requested_mem_type: MemoryType,
         byte_size: usize,
+        data_type: DataType,
     ) -> Result<Buffer, Error> {
-        if self.tensor_types.is_empty() {
-            run_in_context!(0, Buffer::alloc::<u8>(byte_size, requested_mem_type))
-        } else {
-            let data_type = *self.tensor_types.get(&tensor_name).ok_or_else(|| {
-                Error::new(
-                    ErrorCode::NotFound,
-                    format!(
-                        "Tensor {tensor_name} not found for DefaultAllocator: {:?}",
-                        self.tensor_types
-                    ),
-                )
-            })?;
-            let data_type_size = data_type.size();
-            run_in_context!(
-                0,
-                Buffer::alloc_with_data_type(
-                    (byte_size as f32 / data_type_size as f32).ceil() as usize,
-                    requested_mem_type,
-                    data_type,
-                )
+        let data_type_size = data_type.size();
+        run_in_context!(
+            0,
+            Buffer::alloc_with_data_type(
+                (byte_size as f32 / data_type_size as f32).ceil() as usize,
+                requested_mem_type,
+                data_type,
             )
-        }
+        )
     }
 }
 
@@ -195,9 +150,7 @@ impl<'a> Request<'a> {
     /// Add [DefaultAllocator] to the request. \
     /// Check [Allocator] trait and [DefaultAllocator] for more info.
     pub fn add_default_allocator(&mut self) -> &mut Self {
-        let _ = self
-            .custom_allocator
-            .replace(Box::new(DefaultAllocator::new()));
+        let _ = self.custom_allocator.replace(Box::new(DefaultAllocator));
         self
     }
 
@@ -566,14 +519,16 @@ impl<'a> Request<'a> {
         )
     }
 
-    pub(crate) fn add_outputs(&mut self) -> Result<&mut Self, Error> {
+    pub(crate) fn add_outputs(&mut self) -> Result<HashMap<String, DataType>, Error> {
         let model = self.server.get_model(&self.model_name)?;
+        let mut datatype_hints = HashMap::new();
 
         for output in &model.outputs {
             self.add_output(&output.name)?;
+            datatype_hints.insert(output.name.clone(), output.datatype);
         }
 
-        Ok(self)
+        Ok(datatype_hints)
     }
 
     /// Add an output request to an inference request.\
