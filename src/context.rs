@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    ffi::{c_char, c_int},
-    ptr::null_mut,
-    sync::Arc,
-};
+use std::{collections::HashMap, ffi::c_int, sync::Arc};
 
 use cuda_driver_sys::{
     cuCtxCreate_v2, cuCtxDestroy_v2, cuCtxGetApiVersion, cuCtxPopCurrent_v2, cuCtxPushCurrent_v2,
@@ -125,11 +120,11 @@ impl CuDevice {
 
     /// Get name of the device.
     pub fn get_name(&self) -> Result<String, Error> {
-        let name = null_mut::<c_char>();
+        let mut name = vec![0; 256];
 
         cuda_call!(
-            cuDeviceGetName(name, 256, self.device,),
-            from_char_array(name)
+            cuDeviceGetName(name.as_mut_ptr() as *mut _, 256, self.device,),
+            from_char_array(name.as_mut_ptr())
         )
     }
 
