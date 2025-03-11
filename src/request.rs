@@ -612,7 +612,7 @@ fn assert_buffer_shape<N: AsRef<str>>(
         ));
     }
     let shape_size =
-        shape.dims.iter().filter(|n| **n > 0).product::<i64>() as u32 * shape.datatype.size();
+        shape.dims.iter().product::<i64>() as u32 * shape.datatype.size();
 
     if shape_size as usize > buffer.size() {
         Err(Error::new(
