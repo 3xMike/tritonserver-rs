@@ -14,7 +14,10 @@ pub(crate) struct Message(pub(crate) *mut sys::TRITONSERVER_Message);
 impl Message {
     /// Get the serialized message in JSON format.
     pub(crate) fn to_json(&self) -> Result<&[u8], Error> {
+        #[cfg(target_arch = "x86_64")]
         let mut ptr = null::<i8>();
+        #[cfg(target_arch = "aarch64")]
+        let mut ptr = null::<u8>();
         let mut size: usize = 0;
 
         triton_call!(sys::TRITONSERVER_MessageSerializeToJson(

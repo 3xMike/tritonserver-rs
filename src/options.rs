@@ -96,7 +96,7 @@ impl Options {
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetModelRepositoryPath(
                 this,
-                path.as_bytes().as_ptr() as *const i8,
+                path.as_bytes().as_ptr() as *const _,
             ),
             Self(this)
         )
