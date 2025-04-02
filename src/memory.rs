@@ -487,6 +487,7 @@ impl Buffer {
         unsafe { slice::from_raw_parts_mut(self.ptr as *mut u8, self.len) }
     }
 
+    #[allow(clippy::uninit_vec)]
     /// Get content of the buffer as host located bytes.\
     /// `range`: part of the buffer to return.
     pub fn get_owned_slice<Range: RangeBounds<usize> + Debug>(

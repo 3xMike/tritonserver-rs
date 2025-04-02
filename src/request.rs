@@ -98,14 +98,14 @@ impl Allocator for DefaultAllocator {
         data_type: DataType,
     ) -> Result<Buffer, Error> {
         let data_type_size = data_type.size();
-        run_in_context!(
-            0,
+        run_in_context(0, move || {
             Buffer::alloc_with_data_type(
                 (byte_size as f32 / data_type_size as f32).ceil() as usize,
                 requested_mem_type,
                 data_type,
             )
-        )
+        })
+        .await?
     }
 }
 

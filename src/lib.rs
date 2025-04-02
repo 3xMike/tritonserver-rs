@@ -169,6 +169,7 @@ pub mod trace;
 
 pub use crate::{
     error::{Error, ErrorCode},
+    macros::{run_in_context, run_in_context_sync},
     memory::{Buffer, MemoryType},
     request::{Allocator, Request},
     response::Response,

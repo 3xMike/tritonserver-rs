@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## Unreleased - Release Date
+### Changed:
+- run_in_context and run_in_context_sync now are functions.
+### Fixed
+- run_in_context and run_in_context_sync not running in context.
+- run_in_context and run_in_context_sync implicitly taking only the code returning Result.
+
+## [0.2.2](https://github.com/3xMike/tritonserver-rs/tags/0.2.2) - 2025-04-02
+### Fixed
+- Cross-platform bug with null_ptr.
+### Added
+- Allow use of empty buffers for input/output Tensors with empty shape/shape containing 0 or -1.
 
 ## [0.2.1](https://github.com/3xMike/tritonserver-rs/tags/0.2.1) - 2024-12-24
 ### Fixed:
