@@ -18,7 +18,10 @@ pub struct Metrics(pub(crate) *mut sys::TRITONSERVER_Metrics);
 impl Metrics {
     /// Get a buffer containing the metrics in the specified format.
     pub fn formatted(&self, format: Format) -> Result<&[u8], Error> {
+        #[cfg(target_arch = "x86_64")]
         let mut ptr = null::<i8>();
+        #[cfg(target_arch = "aarch64")]
+        let mut ptr = null::<u8>();
         let mut size: usize = 0;
 
         triton_call!(sys::TRITONSERVER_MetricsFormatted(

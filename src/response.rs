@@ -356,7 +356,9 @@ impl InferenceResponseWrapper {
             .to_string();
 
         let shape = if dim_count == 0 {
-            log::warn!("Model returned output '{name}' of shape []. Consider removing this output");
+            log::trace!(
+                "Model returned output '{name}' of shape []. Consider removing this output"
+            );
             Vec::new()
         } else {
             unsafe { from_raw_parts(shape, dim_count as usize) }.to_vec()
