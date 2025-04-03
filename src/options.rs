@@ -637,9 +637,9 @@ unsafe impl Send for Options {}
 impl Drop for Options {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe {
-                let _ = sys::TRITONSERVER_ServerOptionsDelete(self.0);
-            }
+            unsafe { sys::TRITONSERVER_ServerOptionsDelete(self.0) };
         }
     }
 }
+
+// TODO: add arc for safe Sync

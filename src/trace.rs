@@ -380,9 +380,7 @@ impl Trace {
 impl Drop for TraceInner {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe {
-                sys::TRITONSERVER_InferenceTraceDelete(self.0);
-            }
+            unsafe { sys::TRITONSERVER_InferenceTraceDelete(self.0) };
         }
     }
 }

@@ -105,9 +105,7 @@ impl ErrorExt for Error {}
 impl Drop for Error {
     fn drop(&mut self) {
         if self.owned && !self.ptr.is_null() {
-            unsafe {
-                sys::TRITONSERVER_ErrorDelete(self.ptr);
-            }
+            unsafe { sys::TRITONSERVER_ErrorDelete(self.ptr) };
         }
     }
 }
