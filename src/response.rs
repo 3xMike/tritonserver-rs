@@ -402,9 +402,7 @@ impl InferenceResponseWrapper {
 impl Drop for InferenceResponseWrapper {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe {
-                sys::TRITONSERVER_InferenceResponseDelete(self.0);
-            }
+            unsafe { sys::TRITONSERVER_InferenceResponseDelete(self.0) };
         }
     }
 }

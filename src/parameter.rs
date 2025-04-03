@@ -1,4 +1,4 @@
-use std::{fs::File, path::Path, ptr::null_mut};
+use std::{fs::File, path::Path, sync::Arc};
 
 use crate::{error::Error, sys, to_cstring};
 
@@ -24,14 +24,15 @@ pub enum ParameterContent {
 }
 
 /// Parameter of the [Server](crate::Server) or [Response](crate::Response).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parameter {
-    pub(crate) ptr: *mut sys::TRITONSERVER_Parameter,
+    pub(crate) ptr: Arc<*mut sys::TRITONSERVER_Parameter>,
     pub name: String,
     pub content: ParameterContent,
 }
 
 unsafe impl Send for Parameter {}
+unsafe impl Sync for Parameter {}
 
 impl Parameter {
     /// Create new Parameter.
@@ -79,7 +80,7 @@ impl Parameter {
         };
 
         Ok(Self {
-            ptr,
+            ptr: Arc::new(ptr),
             name: name.as_ref().to_string(),
             content: value,
         })
@@ -99,23 +100,10 @@ impl Parameter {
     }
 }
 
-impl Clone for Parameter {
-    fn clone(&self) -> Self {
-        Parameter::new(self.name.clone(), self.content.clone()).unwrap_or_else(|err| {
-            log::warn!("Error cloning parameter: {err}. Result will be empty, do not use it.");
-            Parameter {
-                ptr: null_mut(),
-                name: String::new(),
-                content: ParameterContent::String(String::new()),
-            }
-        })
-    }
-}
-
 impl Drop for Parameter {
     fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            unsafe { sys::TRITONSERVER_ParameterDelete(self.ptr) }
+        if !self.ptr.is_null() && Arc::strong_count(&self.ptr) == 1 {
+            unsafe { sys::TRITONSERVER_ParameterDelete(*self.ptr) }
         }
     }
 }

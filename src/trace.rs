@@ -197,6 +197,7 @@ pub struct Trace {
 
 pub(crate) struct TraceInner(pub(crate) *mut sys::TRITONSERVER_InferenceTrace);
 unsafe impl Send for TraceInner {}
+/// Unclonable, so Sync is safe
 unsafe impl Sync for TraceInner {}
 
 impl PartialEq for Trace {
@@ -380,9 +381,7 @@ impl Trace {
 impl Drop for TraceInner {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe {
-                sys::TRITONSERVER_InferenceTraceDelete(self.0);
-            }
+            unsafe { sys::TRITONSERVER_InferenceTraceDelete(self.0) };
         }
     }
 }

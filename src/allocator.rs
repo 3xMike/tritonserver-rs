@@ -98,9 +98,7 @@ unsafe impl Sync for Inner {}
 impl Drop for Inner {
     fn drop(&mut self) {
         if !self.alloc.is_null() {
-            unsafe {
-                sys::TRITONSERVER_ResponseAllocatorDelete(self.alloc);
-            }
+            unsafe { sys::TRITONSERVER_ResponseAllocatorDelete(self.alloc) };
         }
     }
 }
