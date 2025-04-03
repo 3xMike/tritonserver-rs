@@ -16,7 +16,7 @@ enum Format {
     Prometheus = sys::tritonserver_metricformat_enum_TRITONSERVER_METRIC_PROMETHEUS,
 }
 
-/// Server metrics object.
+/// Prometheus metrics object.
 pub struct PrometheusMetrics(pub(crate) *mut sys::TRITONSERVER_Metrics);
 
 impl PrometheusMetrics {
@@ -59,6 +59,11 @@ pub enum MetricKind {
     Histogram = sys::TRITONSERVER_metrickind_enum_TRITONSERVER_METRIC_KIND_HISTOGRAM,
 }
 
+/// Family of the metrics.
+///
+/// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
+/// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
+/// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
 pub struct MetricFamily(*mut sys::TRITONSERVER_MetricFamily);
 
 impl MetricFamily {
@@ -103,6 +108,11 @@ impl Drop for MetricFamily {
     }
 }
 
+/// Arguments to pass on creating [Metric]. Currently only [Self::set_histogram] is supported.
+///
+/// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
+/// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
+/// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
 pub struct MetricArgs(*mut sys::TRITONSERVER_MetricArgs);
 
 impl MetricArgs {
@@ -133,6 +143,11 @@ impl Drop for MetricArgs {
 }
 
 #[allow(dead_code)]
+/// Metric: Counter, Gauge or Histogram.
+///
+/// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
+/// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
+/// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
 pub struct Metric(*mut sys::TRITONSERVER_Metric, Arc<MetricFamily>);
 
 impl Metric {

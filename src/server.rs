@@ -521,7 +521,7 @@ impl Server {
         self.update_model_info(name)
     }
 
-    /// Get the current metrics for the server.
+    /// Get the current Prometheus metrics for the server.
     pub fn metrics(&self) -> Result<metrics::PrometheusMetrics, Error> {
         let mut metrics = null_mut::<sys::TRITONSERVER_Metrics>();
 
