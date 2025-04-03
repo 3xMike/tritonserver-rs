@@ -12,7 +12,7 @@ use serde_json::{from_slice, Value};
 
 use crate::{
     message::{self, Index, Message, Model},
-    metrics::{self, Metrics},
+    metrics::{self, PrometheusMetrics},
     options::Options,
     parameter::{Parameter, ParameterContent},
     path_to_cstring, sys, to_cstring, Error, ErrorCode, Request,
@@ -522,7 +522,7 @@ impl Server {
     }
 
     /// Get the current metrics for the server.
-    pub fn metrics(&self) -> Result<metrics::Metrics, Error> {
+    pub fn metrics(&self) -> Result<metrics::PrometheusMetrics, Error> {
         let mut metrics = null_mut::<sys::TRITONSERVER_Metrics>();
 
         triton_call!(sys::TRITONSERVER_ServerMetrics(
@@ -531,7 +531,7 @@ impl Server {
         ))?;
 
         assert!(!metrics.is_null());
-        Ok(Metrics(metrics))
+        Ok(PrometheusMetrics(metrics))
     }
 
     pub fn is_log_enabled(&self, level: LogLevel) -> bool {
