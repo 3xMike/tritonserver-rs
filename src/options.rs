@@ -1,4 +1,6 @@
-use std::{ffi::CString, os::unix::prelude::OsStrExt, path::Path, ptr::null_mut, time::Duration};
+use std::{
+    ffi::CString, os::unix::prelude::OsStrExt, path::Path, ptr::null_mut, sync::Arc, time::Duration,
+};
 
 use crate::{
     error::{Error, ErrorCode},
@@ -78,8 +80,11 @@ pub enum InstanceGroupKind {
 }
 
 /// Triton server creation options.
-#[derive(Debug)]
-pub struct Options(pub(crate) *mut sys::TRITONSERVER_ServerOptions);
+#[derive(Debug, Clone)]
+pub struct Options(pub(crate) Arc<*mut sys::TRITONSERVER_ServerOptions>);
+
+unsafe impl Send for Options {}
+unsafe impl Sync for Options {}
 
 impl Options {
     /// Create a new server options object. \
@@ -98,7 +103,7 @@ impl Options {
                 this,
                 path.as_bytes().as_ptr() as *const _,
             ),
-            Self(this)
+            Self(Arc::new(this))
         )
     }
 
@@ -106,7 +111,7 @@ impl Options {
     pub fn server_id<I: AsRef<str>>(&mut self, id: I) -> Result<&mut Self, Error> {
         let id = to_cstring(id)?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetServerId(self.0, id.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetServerId(*self.0, id.as_ptr()),
             self
         )
     }
@@ -118,7 +123,7 @@ impl Options {
     pub fn startup_model<S: AsRef<str>>(&mut self, model: S) -> Result<&mut Self, Error> {
         let model = to_cstring(model)?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetStartupModel(self.0, model.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetStartupModel(*self.0, model.as_ptr()),
             self
         )
     }
@@ -136,7 +141,7 @@ impl Options {
     /// The corresponding model control APIs must be called to load / unload a model in the model repository.
     pub fn model_control_mode(&mut self, mode: Control) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetModelControlMode(self.0, mode as _),
+            sys::TRITONSERVER_ServerOptionsSetModelControlMode(*self.0, mode as _),
             self
         )
     }
@@ -144,7 +149,7 @@ impl Options {
     /// Enable or disable strict model configuration handling in a server options.
     pub fn strict_model_config(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetStrictModelConfig(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetStrictModelConfig(*self.0, enable),
             self
         )
     }
@@ -156,7 +161,7 @@ impl Options {
     pub fn model_config_name<C: AsRef<str>>(&mut self, config_name: C) -> Result<&mut Self, Error> {
         let name = to_cstring(config_name)?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetModelConfigName(self.0, name.as_ptr(),),
+            sys::TRITONSERVER_ServerOptionsSetModelConfigName(*self.0, name.as_ptr(),),
             self
         )
     }
@@ -171,7 +176,7 @@ impl Options {
     /// By default, execution count is used to determine the priorities.
     pub fn rate_limiter_mode(&mut self, mode: Limit) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetRateLimiterMode(self.0, mode as _),
+            sys::TRITONSERVER_ServerOptionsSetRateLimiterMode(*self.0, mode as _),
             self
         )
     }
@@ -194,7 +199,7 @@ impl Options {
         let name = to_cstring(name)?;
         triton_call!(
             sys::TRITONSERVER_ServerOptionsAddRateLimiterResource(
-                self.0,
+                *self.0,
                 name.as_ptr(),
                 count as usize,
                 device,
@@ -208,7 +213,7 @@ impl Options {
     /// `size`: The pinned memory pool byte size.
     pub fn pinned_memory_pool_byte_size(&mut self, size: u64) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetPinnedMemoryPoolByteSize(self.0, size),
+            sys::TRITONSERVER_ServerOptionsSetPinnedMemoryPoolByteSize(*self.0, size),
             self
         )
     }
@@ -223,7 +228,7 @@ impl Options {
         size: u64,
     ) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetCudaMemoryPoolByteSize(self.0, device, size),
+            sys::TRITONSERVER_ServerOptionsSetCudaMemoryPoolByteSize(*self.0, device, size),
             self
         )
     }
@@ -239,7 +244,7 @@ impl Options {
         size: usize,
     ) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetCudaVirtualAddressSize(self.0, device, size),
+            sys::TRITONSERVER_ServerOptionsSetCudaVirtualAddressSize(*self.0, device, size),
             self
         )
     }
@@ -251,7 +256,7 @@ impl Options {
     #[deprecated]
     pub fn response_cache_byte_size(&mut self, size: u64) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetResponseCacheByteSize(self.0, size),
+            sys::TRITONSERVER_ServerOptionsSetResponseCacheByteSize(*self.0, size),
             self
         )
     }
@@ -266,7 +271,7 @@ impl Options {
     ) -> Result<&mut Self, Error> {
         let cache_dir = path_to_cstring(cache_dir)?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetCacheDirectory(self.0, cache_dir.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetCacheDirectory(*self.0, cache_dir.as_ptr()),
             self
         )
     }
@@ -301,7 +306,7 @@ impl Options {
         let config_json = to_cstring(config_json)?;
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetCacheConfig(
-                self.0,
+                *self.0,
                 name.as_ptr(),
                 config_json.as_ptr()
             ),
@@ -316,7 +321,7 @@ impl Options {
         capability: f64,
     ) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetMinSupportedComputeCapability(self.0, capability),
+            sys::TRITONSERVER_ServerOptionsSetMinSupportedComputeCapability(*self.0, capability),
             self
         )
     }
@@ -324,7 +329,7 @@ impl Options {
     /// Enable or disable exit-on-error. True to enable exiting on initialization error, false to continue.
     pub fn exit_on_error(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetExitOnError(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetExitOnError(*self.0, enable),
             self
         )
     }
@@ -332,7 +337,7 @@ impl Options {
     /// Enable or disable strict readiness handling.
     pub fn strict_readiness(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetStrictReadiness(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetStrictReadiness(*self.0, enable),
             self
         )
     }
@@ -340,7 +345,7 @@ impl Options {
     /// Set the exit timeout.
     pub fn exit_timeout(&mut self, timeout: Duration) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetExitTimeout(self.0, timeout.as_secs().max(1) as _),
+            sys::TRITONSERVER_ServerOptionsSetExitTimeout(*self.0, timeout.as_secs().max(1) as _),
             self
         )
     }
@@ -348,7 +353,7 @@ impl Options {
     /// Set the number of threads used in buffer manager.
     pub fn buffer_manager_thread_count(&mut self, thread: usize) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetBufferManagerThreadCount(self.0, thread as _),
+            sys::TRITONSERVER_ServerOptionsSetBufferManagerThreadCount(*self.0, thread as _),
             self
         )
     }
@@ -358,7 +363,7 @@ impl Options {
     /// `thread_count` The number of threads.
     pub fn model_load_thread_count(&mut self, thread_count: usize) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetModelLoadThreadCount(self.0, thread_count as _),
+            sys::TRITONSERVER_ServerOptionsSetModelLoadThreadCount(*self.0, thread_count as _),
             self
         )
     }
@@ -368,7 +373,7 @@ impl Options {
     /// `retry_count` The number of retry.
     pub fn model_retry_count(&mut self, retry_count: usize) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetModelLoadRetryCount(self.0, retry_count as _),
+            sys::TRITONSERVER_ServerOptionsSetModelLoadRetryCount(*self.0, retry_count as _),
             self
         )
     }
@@ -380,7 +385,7 @@ impl Options {
     /// `enable_peer_access` Whether to enable peer access or not.
     pub fn peer_access(&mut self, enable_peer_access: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetEnablePeerAccess(self.0, enable_peer_access),
+            sys::TRITONSERVER_ServerOptionsSetEnablePeerAccess(*self.0, enable_peer_access),
             self
         )
     }
@@ -390,7 +395,7 @@ impl Options {
     /// `enable_namespace` Whether to enable model namespacing or not.
     pub fn model_namespacing(&mut self, enable_namespace: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetModelNamespacing(self.0, enable_namespace),
+            sys::TRITONSERVER_ServerOptionsSetModelNamespacing(*self.0, enable_namespace),
             self
         )
     }
@@ -402,7 +407,7 @@ impl Options {
     pub fn log_file<P: AsRef<str>>(&mut self, log_file: P) -> Result<&mut Self, Error> {
         let log_file = to_cstring(log_file)?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogFile(self.0, log_file.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetLogFile(*self.0, log_file.as_ptr()),
             self
         )
     }
@@ -410,7 +415,7 @@ impl Options {
     /// Enable or disable info level logging.
     pub fn log_info(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogInfo(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetLogInfo(*self.0, enable),
             self
         )
     }
@@ -418,7 +423,7 @@ impl Options {
     /// Enable or disable warning level logging.
     pub fn log_warn(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogWarn(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetLogWarn(*self.0, enable),
             self
         )
     }
@@ -426,14 +431,14 @@ impl Options {
     /// Enable or disable error level logging.
     pub fn log_error(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogError(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetLogError(*self.0, enable),
             self
         )
     }
 
     pub fn log_format(&mut self, log_format: LogFormat) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogFormat(self.0, log_format as _),
+            sys::TRITONSERVER_ServerOptionsSetLogFormat(*self.0, log_format as _),
             self
         )
     }
@@ -441,7 +446,7 @@ impl Options {
     /// Set verbose logging level. Level zero disables verbose logging.
     pub fn log_verbose(&mut self, level: i32) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetLogVerbose(self.0, level),
+            sys::TRITONSERVER_ServerOptionsSetLogVerbose(*self.0, level),
             self
         )
     }
@@ -449,7 +454,7 @@ impl Options {
     /// Enable or disable metrics collection in a server options.
     pub fn metrics(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetMetrics(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetMetrics(*self.0, enable),
             self
         )
     }
@@ -458,7 +463,7 @@ impl Options {
     /// GPU metrics are collected if both this option and [Options::metrics] are set.
     pub fn gpu_metrics(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetGpuMetrics(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetGpuMetrics(*self.0, enable),
             self
         )
     }
@@ -468,7 +473,7 @@ impl Options {
     /// True to enable CPU metrics, false to disable.
     pub fn cpu_metrics(&mut self, enable: bool) -> Result<&mut Self, Error> {
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetCpuMetrics(self.0, enable),
+            sys::TRITONSERVER_ServerOptionsSetCpuMetrics(*self.0, enable),
             self
         )
     }
@@ -478,7 +483,7 @@ impl Options {
     pub fn metrics_interval(&mut self, interval: Duration) -> Result<&mut Self, Error> {
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetMetricsInterval(
-                self.0,
+                *self.0,
                 interval.as_millis().max(1) as _,
             ),
             self
@@ -499,7 +504,7 @@ impl Options {
                     .map_err(|err| Error::new(ErrorCode::InvalidArg, err.to_string()))
             })?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetBackendDirectory(self.0, path.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetBackendDirectory(*self.0, path.as_ptr()),
             self
         )
     }
@@ -511,7 +516,7 @@ impl Options {
         let path = CString::new(path.as_ref().as_os_str().as_bytes())
             .map_err(|err| Error::new(ErrorCode::InvalidArg, format!("{}", err)))?;
         triton_call!(
-            sys::TRITONSERVER_ServerOptionsSetRepoAgentDirectory(self.0, path.as_ptr()),
+            sys::TRITONSERVER_ServerOptionsSetRepoAgentDirectory(*self.0, path.as_ptr()),
             self
         )
     }
@@ -534,7 +539,7 @@ impl Options {
     ) -> Result<&mut Self, Error> {
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetModelLoadDeviceLimit(
-                self.0, kind as _, device, fraction
+                *self.0, kind as _, device, fraction
             ),
             self
         )
@@ -561,7 +566,7 @@ impl Options {
 
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetBackendConfig(
-                self.0,
+                *self.0,
                 name.as_ptr(),
                 setting.as_ptr(),
                 value.as_ptr(),
@@ -591,7 +596,7 @@ impl Options {
 
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetHostPolicy(
-                self.0,
+                *self.0,
                 name.as_ptr(),
                 setting.as_ptr(),
                 value.as_ptr(),
@@ -622,7 +627,7 @@ impl Options {
 
         triton_call!(
             sys::TRITONSERVER_ServerOptionsSetMetricsConfig(
-                self.0,
+                *self.0,
                 name.as_ptr(),
                 setting.as_ptr(),
                 value.as_ptr()
@@ -632,14 +637,10 @@ impl Options {
     }
 }
 
-unsafe impl Send for Options {}
-
 impl Drop for Options {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { sys::TRITONSERVER_ServerOptionsDelete(self.0) };
+        if !self.0.is_null() && Arc::strong_count(&self.0) == 1 {
+            unsafe { sys::TRITONSERVER_ServerOptionsDelete(*self.0) };
         }
     }
 }
-
-// TODO: add arc for safe Sync

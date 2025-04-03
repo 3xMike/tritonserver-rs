@@ -130,13 +130,14 @@ pub struct Server {
 }
 
 unsafe impl Send for Server {}
+
 impl Server {
     /// Create new server object.
     pub async fn new(options: Options) -> Result<Self, Error> {
         let mut server = null_mut::<sys::TRITONSERVER_Server>();
         triton_call!(sys::TRITONSERVER_ServerNew(
             &mut server as *mut _,
-            options.0
+            *options.0
         ))?;
 
         assert!(!server.is_null());
@@ -233,7 +234,7 @@ impl Server {
         let mut mapping_params = name_mapping
             .into_iter()
             .map(|(k, v)| {
-                Parameter::new(k, ParameterContent::String(v)).map(|param| param.ptr as *const _)
+                Parameter::new(k, ParameterContent::String(v)).map(|param| *param.ptr as *const _)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -531,7 +532,7 @@ impl Server {
         ))?;
 
         assert!(!metrics.is_null());
-        Ok(PrometheusMetrics(metrics))
+        Ok(PrometheusMetrics(Arc::new(metrics)))
     }
 
     pub fn is_log_enabled(&self, level: LogLevel) -> bool {

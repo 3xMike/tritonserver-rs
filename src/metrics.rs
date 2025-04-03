@@ -17,7 +17,11 @@ enum Format {
 }
 
 /// Prometheus metrics object.
-pub struct PrometheusMetrics(pub(crate) *mut sys::TRITONSERVER_Metrics);
+#[derive(Debug, Clone)]
+pub struct PrometheusMetrics(pub(crate) Arc<*mut sys::TRITONSERVER_Metrics>);
+
+unsafe impl Send for PrometheusMetrics {}
+unsafe impl Sync for PrometheusMetrics {}
 
 impl PrometheusMetrics {
     /// Get a buffer containing the metrics in the specified format.
@@ -31,7 +35,7 @@ impl PrometheusMetrics {
         let mut size: usize = 0;
 
         triton_call!(sys::TRITONSERVER_MetricsFormatted(
-            self.0,
+            *self.0,
             format as _,
             &mut ptr as *mut _,
             &mut size as *mut _,
@@ -44,8 +48,8 @@ impl PrometheusMetrics {
 
 impl Drop for PrometheusMetrics {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { sys::TRITONSERVER_MetricsDelete(self.0) };
+        if !self.0.is_null() && Arc::strong_count(&self.0) == 1 {
+            unsafe { sys::TRITONSERVER_MetricsDelete(*self.0) };
         }
     }
 }
@@ -64,7 +68,11 @@ pub enum MetricKind {
 /// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
 /// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
 /// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
-pub struct MetricFamily(*mut sys::TRITONSERVER_MetricFamily);
+#[derive(Debug, Clone)]
+pub struct MetricFamily(Arc<*mut sys::TRITONSERVER_MetricFamily>);
+
+unsafe impl Send for MetricFamily {}
+unsafe impl Sync for MetricFamily {}
 
 impl MetricFamily {
     /// Create a new metric family object.
@@ -88,22 +96,22 @@ impl MetricFamily {
                 c_name.as_ptr(),
                 descr.as_ptr()
             ),
-            Self(res)
+            Self(Arc::new(res))
         )
     }
 
     /// Get the kind of the metric family.
     pub fn kind(&self) -> Result<MetricKind, Error> {
         let mut res = 0;
-        triton_call!(sys::TRITONSERVER_GetMetricFamilyKind(self.0, &mut res))?;
+        triton_call!(sys::TRITONSERVER_GetMetricFamilyKind(*self.0, &mut res))?;
         Ok(unsafe { transmute::<u32, MetricKind>(res) })
     }
 }
 
 impl Drop for MetricFamily {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { sys::TRITONSERVER_MetricFamilyDelete(self.0) };
+        if !self.0.is_null() && Arc::strong_count(&self.0) == 1 {
+            unsafe { sys::TRITONSERVER_MetricFamilyDelete(*self.0) };
         }
     }
 }
@@ -113,13 +121,20 @@ impl Drop for MetricFamily {
 /// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
 /// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
 /// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
-pub struct MetricArgs(*mut sys::TRITONSERVER_MetricArgs);
+#[derive(Debug, Clone)]
+pub struct MetricArgs(Arc<*mut sys::TRITONSERVER_MetricArgs>);
+
+unsafe impl Send for MetricArgs {}
+unsafe impl Sync for MetricArgs {}
 
 impl MetricArgs {
     /// Create a new metric args object.
     pub fn new() -> Result<Self, Error> {
         let mut res = null_mut::<sys::TRITONSERVER_MetricArgs>();
-        triton_call!(sys::TRITONSERVER_MetricArgsNew(&mut res), Self(res))
+        triton_call!(
+            sys::TRITONSERVER_MetricArgsNew(&mut res),
+            Self(Arc::new(res))
+        )
     }
 
     /// Set metric args with histogram metric parameter.
@@ -128,7 +143,7 @@ impl MetricArgs {
     pub fn set_histogram<B: AsRef<[f64]>>(&mut self, buckets: B) -> Result<&mut Self, Error> {
         let buckets = buckets.as_ref();
         triton_call!(
-            sys::TRITONSERVER_MetricArgsSetHistogram(self.0, buckets.as_ptr(), buckets.len() as _),
+            sys::TRITONSERVER_MetricArgsSetHistogram(*self.0, buckets.as_ptr(), buckets.len() as _),
             self
         )
     }
@@ -136,8 +151,8 @@ impl MetricArgs {
 
 impl Drop for MetricArgs {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { sys::TRITONSERVER_MetricArgsDelete(self.0) };
+        if !self.0.is_null() && Arc::strong_count(&self.0) == 1 {
+            unsafe { sys::TRITONSERVER_MetricArgsDelete(*self.0) };
         }
     }
 }
@@ -148,22 +163,31 @@ impl Drop for MetricArgs {
 /// Author note: the current state of [Metric], [MetricKind], [MetricFamily] is not kinda useful.
 /// Added due to the politic to add every item of [original API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
 /// It's worth considering using dedicated crates like [metrics](https://crates.io/crates/metrics).
-pub struct Metric(*mut sys::TRITONSERVER_Metric, Arc<MetricFamily>);
+#[derive(Debug, Clone)]
+pub struct Metric(Arc<*mut sys::TRITONSERVER_Metric>, MetricFamily);
+
+unsafe impl Send for Metric {}
+unsafe impl Sync for Metric {}
 
 impl Metric {
     /// Create a new metric object.
     /// - `family`: The metric family to add this new metric to.
     /// - `labels`: The array of labels to associate with this new metric.
-    pub fn new<P: AsRef<[Parameter]>>(family: Arc<MetricFamily>, labels: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<[Parameter]>>(family: &MetricFamily, labels: P) -> Result<Self, Error> {
         let mut res = null_mut::<sys::TRITONSERVER_Metric>();
         let mut labels = labels
             .as_ref()
             .iter()
-            .map(|p| p.ptr as *const _)
+            .map(|p| *p.ptr as *const _)
             .collect::<Vec<_>>();
         triton_call!(
-            sys::TRITONSERVER_MetricNew(&mut res, family.0, labels.as_mut_ptr(), labels.len() as _),
-            Self(res, family.clone())
+            sys::TRITONSERVER_MetricNew(
+                &mut res,
+                *family.0,
+                labels.as_mut_ptr(),
+                labels.len() as _
+            ),
+            Self(Arc::new(res), family.clone())
         )
     }
 
@@ -173,7 +197,7 @@ impl Metric {
     /// - `args`: Metric args that store additional arguments to construct
     ///     particular metric types, e.g. histogram.
     pub fn new_with_args<P: AsRef<[Parameter]>>(
-        family: Arc<MetricFamily>,
+        family: &MetricFamily,
         labels: P,
         args: &MetricArgs,
     ) -> Result<Self, Error> {
@@ -181,24 +205,24 @@ impl Metric {
         let mut labels = labels
             .as_ref()
             .iter()
-            .map(|p| p.ptr as *const _)
+            .map(|p| *p.ptr as *const _)
             .collect::<Vec<_>>();
         triton_call!(
             sys::TRITONSERVER_MetricNewWithArgs(
                 &mut res,
-                family.0,
+                *family.0,
                 labels.as_mut_ptr(),
                 labels.len() as _,
-                args.0 as *const _
+                *args.0 as *const _
             ),
-            Self(res, family.clone())
+            Self(Arc::new(res), family.clone())
         )
     }
 
     /// Get the kind of metric of its corresponding family.
     pub fn kind(&self) -> Result<MetricKind, Error> {
         let mut res = 0;
-        triton_call!(sys::TRITONSERVER_GetMetricKind(self.0, &mut res))?;
+        triton_call!(sys::TRITONSERVER_GetMetricKind(*self.0, &mut res))?;
         Ok(unsafe { transmute::<u32, MetricKind>(res) })
     }
 
@@ -208,7 +232,7 @@ impl Metric {
     /// for other kinds.
     pub fn value(&self) -> Result<f64, Error> {
         let mut res = 0.;
-        triton_call!(sys::TRITONSERVER_MetricValue(self.0, &mut res), res)
+        triton_call!(sys::TRITONSERVER_MetricValue(*self.0, &mut res), res)
     }
 
     /// Increment the current value of metric by value.
@@ -219,7 +243,7 @@ impl Metric {
     /// [MetricKind::Counter] metric.
     /// - `value`: The amount to increment the metric's value by.
     pub fn increment_by(&self, value: f64) -> Result<(), Error> {
-        triton_call!(sys::TRITONSERVER_MetricIncrement(self.0, value))
+        triton_call!(sys::TRITONSERVER_MetricIncrement(*self.0, value))
     }
 
     /// Set the current value of metric to value.
@@ -228,7 +252,7 @@ impl Metric {
     ///
     /// - `value`: The amount to set metric's value to.
     pub fn set(&self, value: f64) -> Result<(), Error> {
-        triton_call!(sys::TRITONSERVER_MetricSet(self.0, value))
+        triton_call!(sys::TRITONSERVER_MetricSet(*self.0, value))
     }
 
     /// Sample an observation and count it to the appropriate bucket of a metric.
@@ -236,14 +260,14 @@ impl Metric {
     /// [Error::Unsupported](crate::ErrorCode::Unsupported) for other kinds.
     /// - `value`: The amount for metric to sample observation.
     pub fn observe(&self, value: f64) -> Result<(), Error> {
-        triton_call!(sys::TRITONSERVER_MetricObserve(self.0, value))
+        triton_call!(sys::TRITONSERVER_MetricObserve(*self.0, value))
     }
 }
 
 impl Drop for Metric {
     fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { sys::TRITONSERVER_MetricDelete(self.0) };
+        if !self.0.is_null() && Arc::strong_count(&self.0) == 1 {
+            unsafe { sys::TRITONSERVER_MetricDelete(*self.0) };
         }
     }
 }

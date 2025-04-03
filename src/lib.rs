@@ -127,6 +127,7 @@
 //! `1.33` (Minimal TRITON_CONTAINER_VERSION=23.07).
 
 #![allow(clippy::bad_bit_mask)]
+#![allow(clippy::arc_with_non_send_sync)]
 
 /// Macros to run some Cuda operations in context.
 #[macro_use]
