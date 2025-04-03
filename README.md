@@ -122,4 +122,4 @@ For further details, check out the following resources:
 - **Rust-based**: Enjoy the safety, speed, and concurrency benefits of Rust.
 
 # Tritonserver C-lib API version
-`1.33` (Minimal TRITON_CONTAINER_VERSION=23.07).
+`1.34` (Minimal TRITON_CONTAINER_VERSION=24.08).
