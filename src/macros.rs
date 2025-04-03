@@ -1,3 +1,5 @@
+use crate::Error;
+
 #[cfg(feature = "gpu")]
 /// Run cuda method and get the Result<(), tritonserver_rs::Error> instead of cuda_driver_sys::CUresult.
 macro_rules! cuda_call {
@@ -53,27 +55,38 @@ macro_rules! triton_call {
     }};
 }
 
+// Next two fns in this module by historical reasons.
+
 /// Run cuda code (which should be run in sync + cuda context pinned) in asynchronous context.
 ///
-/// First argument is an id of device to run function on; second is the code to run. All the variables will be moved.
+/// First argument is an id of device to run function on; second is the code to run.
 ///
 /// If "gpu" feature is off just runs a code without context/blocking.
-#[macro_export]
-macro_rules! run_in_context {
-    ($val: expr, $expr: expr) => {{
-        #[cfg(feature = "gpu")]
-        {
-            tokio::task::spawn_blocking(move || {
-                let ctx = $crate::get_context($val)?;
-                let _handle = ctx.make_current()?;
-                $expr
-            })
-            .await
-            .expect("tokio failed to join thread")
-        }
-        #[cfg(not(feature = "gpu"))]
-        $expr
-    }};
+pub async fn run_in_context<T, F>(device: i32, code: F) -> Result<T, Error>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    #[cfg(feature = "gpu")]
+    {
+        tokio::task::spawn_blocking(move || {
+            let ctx = crate::get_context(device)?;
+            let _handle = ctx.make_current()?;
+            Ok(code())
+        })
+        .await
+        .map_err(|_| {
+            Error::new(
+                crate::ErrorCode::Internal,
+                "tokio failed to join thread on run_in_context",
+            )
+        })?
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        let _ = device;
+        Ok(code())
+    }
 }
 
 /// Run cuda code (which should be run in sync + cuda context pinned).
@@ -81,16 +94,16 @@ macro_rules! run_in_context {
 /// First argument is an id of device to run function on; second is the code to run.
 ///
 /// If "gpu" feature is off just runs a code without context/blocking.
-#[macro_export]
-macro_rules! run_in_context_sync {
-    ($val: expr, $expr: expr) => {{
-        #[cfg(feature = "gpu")]
-        {
-            let ctx = $crate::get_context($val)?;
-            let _handle = ctx.make_current()?;
-            $expr
-        }
-        #[cfg(not(feature = "gpu"))]
-        $expr
-    }};
+pub fn run_in_context_sync<T, F: FnOnce() -> T>(device: i32, code: F) -> Result<T, Error> {
+    #[cfg(feature = "gpu")]
+    {
+        let ctx = crate::get_context(device)?;
+        let _handle = ctx.make_current()?;
+        Ok(code())
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        let _ = device;
+        Ok(code())
+    }
 }
