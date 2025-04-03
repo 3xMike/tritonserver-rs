@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Updated:
 - Core API to v1.34 (branch r24.08).
 - Minimal triton container version to build/run code to 24.08.
+### Changed:
+- metrics::Metrics now are metrics::PrometheusMetrics.
+### Added:
+- metrics::MetricFamily and metrics::Metric (counter/gauge/histogram).
+- Clone and Send+Sync impls almost to all the public structures.
 
 ## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-03
 ### Changed:
