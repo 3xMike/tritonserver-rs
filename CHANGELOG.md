@@ -4,8 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased - Release Date
+## [0.4.0](https://github.com/3xMike/tritonserver-rs/tags/0.4.0) - 2025-04-03
+### Updated:
+- Core API to v1.34 (branch r24.08).
+- Minimal triton container version to build/run code to 24.08.
+### Changed:
+- metrics::Metrics now are metrics::PrometheusMetrics.
+### Added:
+- metrics::MetricFamily and metrics::Metric (counter/gauge/histogram).
+- Clone and Send+Sync impls almost to all the public structures.
 
-## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-03
+## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-07
 ### Changed:
 - run_in_context and run_in_context_sync now are functions.
 ### Fixed

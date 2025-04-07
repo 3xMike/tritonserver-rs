@@ -34,9 +34,7 @@ impl Message {
 impl Drop for Message {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe {
-                sys::TRITONSERVER_MessageDelete(self.0);
-            }
+            unsafe { sys::TRITONSERVER_MessageDelete(self.0) };
         }
     }
 }
