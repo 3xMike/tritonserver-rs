@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - metrics::MetricFamily and metrics::Metric (counter/gauge/histogram).
 - Clone and Send+Sync impls almost to all the public structures.
 
-## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-03
+## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-07
 ### Changed:
 - run_in_context and run_in_context_sync now are functions.
 ### Fixed
