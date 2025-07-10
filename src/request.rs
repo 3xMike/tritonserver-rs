@@ -19,12 +19,24 @@ use crate::{
     to_cstring, Error, Server,
 };
 
+#[deprecated(
+    since = "0.4.1",
+    note = "Can't be used with bit operations as flags. Use `SequenceFlag` instead"
+)]
 /// Inference request sequence flag.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Sequence {
     Start = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_START,
     End = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_END,
+}
+
+bitflags::bitflags! {
+    /// Inference request sequence flag.
+    pub struct SequenceFlag: u32 {
+        const START = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_START;
+        const END = sys::tritonserver_requestflag_enum_TRITONSERVER_REQUEST_FLAG_SEQUENCE_END;
+    }
 }
 
 /// Allocator, that user provides in order to allocate output buffers when they are needed for Triton. \
@@ -180,6 +192,11 @@ impl<'a> Request<'a> {
         )
     }
 
+    #[deprecated(
+        since = "0.4.1",
+        note = "Can't be used with bit operations as flags. Use `Request::get_sequence_flags instead`"
+    )]
+    #[allow(deprecated)]
     /// Get the flag(s) associated with the request. \
     /// Check [Sequence] for available flags.
     pub fn get_flags(&self) -> Result<Sequence, Error> {
@@ -191,11 +208,39 @@ impl<'a> Request<'a> {
         unsafe { Ok(transmute::<u32, Sequence>(flag)) }
     }
 
+    /// Get the flag(s) associated with the request. \
+    /// Check [SequenceFlag] for available flags.
+    pub fn get_sequence_flags(&self) -> Result<SequenceFlag, Error> {
+        let mut flag: u32 = 0;
+        triton_call!(sys::TRITONSERVER_InferenceRequestFlags(
+            self.ptr,
+            &mut flag as *mut _
+        ))?;
+        SequenceFlag::from_bits(flag).ok_or(Error::new(
+            ErrorCode::Internal,
+            format!("Triton returned unknown SequenceFlag: {flag:#b}"),
+        ))
+    }
+
+    #[deprecated(
+        since = "0.4.1",
+        note = "Can't be used with bit operations as flags. Use `Request::set_sequence_flags instead`"
+    )]
+    #[allow(deprecated)]
     /// Set the flag(s) associated with a request. \
     /// Check [Sequence] for available flags.
     pub fn set_flags(&mut self, flags: Sequence) -> Result<&mut Self, Error> {
         triton_call!(
             sys::TRITONSERVER_InferenceRequestSetFlags(self.ptr, flags as _),
+            self
+        )
+    }
+
+    /// Set the flag(s) associated with a request. \
+    /// Check [SequenceFlag] for available flags.
+    pub fn set_sequence_flags(&mut self, flags: SequenceFlag) -> Result<&mut Self, Error> {
+        triton_call!(
+            sys::TRITONSERVER_InferenceRequestSetFlags(self.ptr, flags.bits()),
             self
         )
     }

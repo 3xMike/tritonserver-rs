@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased - Release Date
+## [0.4.1](https://github.com/3xMike/tritonserver-rs/tags/0.4.1) - 2025-07-10
+### Added:
+- request::Request::get_sequence_flags() & ::set_sequence_flags().
+- request::SequenceFlag struct.
+### Depricated
+- request::Request::get_flags() & ::set_flags().
+- request::Sequence enum.
+
 ## [0.4.0](https://github.com/3xMike/tritonserver-rs/tags/0.4.0) - 2025-04-03
 ### Updated:
 - Core API to v1.34 (branch r24.08).
