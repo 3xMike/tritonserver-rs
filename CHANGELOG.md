@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## Unreleased - Release Date
-## [0.4.1](https://github.com/3xMike/tritonserver-rs/tags/0.4.1) - 2025-07-10
+## [0.4.1](https://github.com/3xMike/tritonserver-rs/releases/tag/0.4.1) - 2025-07-10
 ### Added:
 - request::Request::get_sequence_flags() & ::set_sequence_flags().
 - request::SequenceFlag struct.
@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - request::Request::get_flags() & ::set_flags().
 - request::Sequence enum.
 
-## [0.4.0](https://github.com/3xMike/tritonserver-rs/tags/0.4.0) - 2025-04-03
+## [0.4.0](https://github.com/3xMike/tritonserver-rs/releases/tag/0.4.0) - 2025-04-03
 ### Updated:
 - Core API to v1.34 (branch r24.08).
 - Minimal triton container version to build/run code to 24.08.
@@ -22,14 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - metrics::MetricFamily and metrics::Metric (counter/gauge/histogram).
 - Clone and Send+Sync impls almost to all the public structures.
 
-## [0.3.0](https://github.com/3xMike/tritonserver-rs/tags/0.3.0) - 2025-04-07
+## [0.3.0](https://github.com/3xMike/tritonserver-rs/releases/tag/0.3.0) - 2025-04-07
 ### Changed:
 - run_in_context and run_in_context_sync now are functions.
 ### Fixed
 - run_in_context and run_in_context_sync not running in context.
 - run_in_context and run_in_context_sync implicitly taking only the code returning Result.
 
-## [0.2.2](https://github.com/3xMike/tritonserver-rs/tags/0.2.2) - 2025-04-02
+## [0.2.2](https://github.com/3xMike/tritonserver-rs/releases/tag/0.2.2) - 2025-04-02
 ### Fixed
 - Cross-platform bug with null_ptr.
 ### Added
@@ -37,17 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased - Release Date
 
-## [0.2.2](https://github.com/3xMike/tritonserver-rs/tags/0.2.2) - 2025-04-02
+## [0.2.2](https://github.com/3xMike/tritonserver-rs/releases/tag/0.2.2) - 2025-04-02
 ### Fixed
 - Cross-platform bug with null_ptr.
 ### Added
 - Allow use of empty buffers for input/output Tensors with empty shape/shape containing 0 or -1.
 
-## [0.2.1](https://github.com/3xMike/tritonserver-rs/tags/0.2.1) - 2024-12-24
+## [0.2.1](https://github.com/3xMike/tritonserver-rs/releases/tag/0.2.1) - 2024-12-24
 ### Fixed:
 - Error on context::get_context()
 
-## [0.2.0](https://github.com/3xMike/tritonserver-rs/tags/0.2.0) - 2024-12-23
+## [0.2.0](https://github.com/3xMike/tritonserver-rs/releases/tag/0.2.0) - 2024-12-23
 ### Changed:
 - Triton C-API version to 1.33.
 - Minimal TritonInferenceServer container version to 24.07.
@@ -106,5 +106,5 @@ Following Tritonserver C-API structures and their functions was not implemented,
 
 Metric (not to be confused with Metrics) will not be implemented because there are better solutions on Rust.
 
-## [0.1.0](https://github.com/3xMike/tritonserver-rs/tags/0.1.0) - 2024-12-04
+## [0.1.0](https://github.com/3xMike/tritonserver-rs/releases/tag/0.1.0) - 2024-12-04
 INITIAL STATE
